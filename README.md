@@ -259,7 +259,8 @@ find . -type f | sort | TZ=CET zip -X -r0 ../org.zaptv.blocktv_0.2.0.mpk -@
   means the last one to resume gets the callbacks.
 - All network fetches degrade gracefully: fields show `--` until data
   arrives, and each API endpoint fails independently.
-- `assets/bt_bold.ttf` is an ASCII subset of Roboto Bold (Apache License
+- Licensed under the [MIT License](LICENSE). Bundled exception:
+  `assets/bt_bold.ttf` is an ASCII subset of Roboto Bold (Apache License
   2.0), rendered via LVGL tiny_ttf so values can scale to any size. If
   the build lacks tiny_ttf the app falls back to the builtin Montserrat
   sizes (max 28 px).
