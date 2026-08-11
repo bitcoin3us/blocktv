@@ -7,7 +7,7 @@ not in your pocket.**
 BlockTV is the first app of its kind for
 [MicroPythonOS](https://micropythonos.com): a fully customisable,
 open-source Bitcoin dashboard built for small always-on screens. Compose
-your own pages from sixteen data fields, swipe between them, and let the
+your own pages from seventeen data fields, swipe between them, and let the
 numbers roll in odometer-style — on hardware you can hold in one hand.
 
 From the makers of ZapTV, at [ZapTV.org](https://www.ZapTV.org).
