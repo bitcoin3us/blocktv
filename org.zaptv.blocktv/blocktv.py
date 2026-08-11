@@ -181,9 +181,13 @@ _FONT_LADDER = (28, 24, 20, 18, 16, 14, 12, 10, 8)
 
 # Bundled bold TTF for arbitrarily large value text (Roboto Bold subset,
 # ASCII only — symbols/emoji still come from the builtin fonts).
+# Flat layout (MPOS 0.13+) first, then the pre-0.13 assets/ mirror so a
+# package installed on an older device still finds its font.
 _TTF_CANDIDATES = (
-    "/apps/{}/assets/bt_bold.ttf",   # device
-    "apps/{}/assets/bt_bold.ttf",    # desktop (CWD = internal_filesystem)
+    "/apps/{}/bt_bold.ttf",          # device
+    "apps/{}/bt_bold.ttf",           # desktop (CWD = internal_filesystem)
+    "/apps/{}/assets/bt_bold.ttf",   # pre-0.13 nested layout
+    "apps/{}/assets/bt_bold.ttf",
 )
 
 # Average glyph advance relative to font size for Roboto Bold digits.

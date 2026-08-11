@@ -223,7 +223,9 @@ nest directories. See `~/MicroPythonOS/MPOS_APP_DEV.md` §7.)
 
 ### Desktop emulator
 
-The app is symlinked into the MicroPythonOS workspace at
+The app uses the flat MPOS package layout (0.13+): modules sit at
+the app root and are imported by bare name. It is symlinked into the
+MicroPythonOS workspace at
 `~/MicroPythonOS/internal_filesystem/apps/org.zaptv.blocktv`, so it shows
 up in the launcher of the desktop build (`scripts/run_desktop.sh`).
 
@@ -251,7 +253,7 @@ find . -type f | sort | TZ=CET zip -X -r0 ../org.zaptv.blocktv_0.2.0.mpk -@
 
 ## Notes
 
-- `assets/nostr_service.py` is the shared NostrManager used by the nostr
+- `nostr_service.py` is the shared NostrManager used by the nostr
   and Lightning Piggy apps (plus one additive `configure_relays()` method
   for identity-free zap watching). The manager is a device-wide singleton:
   whichever app's copy imports first wins, and NWC callbacks are global —
@@ -260,7 +262,7 @@ find . -type f | sort | TZ=CET zip -X -r0 ../org.zaptv.blocktv_0.2.0.mpk -@
 - All network fetches degrade gracefully: fields show `--` until data
   arrives, and each API endpoint fails independently.
 - Licensed under the [MIT License](LICENSE). Bundled exception:
-  `assets/bt_bold.ttf` is an ASCII subset of Roboto Bold (Apache License
+  `bt_bold.ttf` is an ASCII subset of Roboto Bold (Apache License
   2.0), rendered via LVGL tiny_ttf so values can scale to any size. If
   the build lacks tiny_ttf the app falls back to the builtin Montserrat
   sizes (max 28 px).
