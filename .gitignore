@@ -1,2 +1,4 @@
 .DS_Store
 *.mpk
+__pycache__/
+*.pyc
