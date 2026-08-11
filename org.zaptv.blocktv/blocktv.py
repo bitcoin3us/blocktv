@@ -43,7 +43,13 @@ from zap_service import ZapMonitor
 DEFAULT_RELAYS = ("wss://relay.primal.net,wss://nos.lol,"
                   "wss://relay.snort.social,wss://offchain.pub")
 DEFAULT_REFRESH_SECONDS = 60
+# What a fresh install opens on. The 24h chart leads because it is the
+# one field that fills the screen and shows the app doing something the
+# moment the first fetch lands; the grids behind it are the reference
+# numbers. Only used when no screens have been saved yet — an existing
+# install keeps whatever the user composed.
 DEFAULT_SCREENS = [
+    ["price_chart"],
     ["block_height", "spot_price", "moscow_time", "fee_rate"],
     ["halving", "supply", "market_cap", "clock"],
 ]

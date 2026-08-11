@@ -117,6 +117,9 @@ compute moscow time, halving, supply and market cap on-device.
 
 ## Custom screens
 
+A fresh install opens on the 24h chart, with the block-height and
+halving grids behind it; from there the screens are yours to change.
+
 Settings → **Screens**. Each screen holds 1–8 fields; the layout
 adapts automatically (one huge tile, stacked rows, or a grid) and each
 value is scaled to fill its tile — a single field fills the whole screen.
