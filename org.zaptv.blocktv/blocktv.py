@@ -1311,10 +1311,10 @@ class BlockTV(Activity):
             # Wordmark fallback keeps the start screen branded even if the
             # PNG is missing or the decoder rejects it.
             label = lv.label(overlay)
-            label.set_text("BlockTV!")
+            label.set_text("BlockTV")
             label.set_style_text_color(self.fg, lv.PART.MAIN)
             label.set_style_text_font(
-                self._value_font(fit_size("BlockTV!",
+                self._value_font(fit_size("BlockTV",
                                           DisplayMetrics.width() * 4 // 5,
                                           DisplayMetrics.height() // 4)),
                 lv.PART.MAIN)
@@ -1884,7 +1884,7 @@ class AboutActivity(Activity):
         super().onResume(screen)
         screen.clean()
         self._add_logo(screen)
-        for name, value in (("BlockTV!", app_version(self.appFullName)),
+        for name, value in (("BlockTV", app_version(self.appFullName)),
                             ("MicroPythonOS", _os_version()),
                             ("Hardware", _pretty_hardware(_hardware_id()))):
             self._add_fact(screen, name, value)
@@ -1920,7 +1920,7 @@ class AboutActivity(Activity):
             except Exception as e:
                 print("BlockTV: about logo failed: {}".format(e))
         label = lv.label(screen)
-        label.set_text("BlockTV!")
+        label.set_text("BlockTV")
         label.set_style_text_font(FontManager.getFont(size=28), lv.PART.MAIN)
 
     def _add_fact(self, screen, name, value):
