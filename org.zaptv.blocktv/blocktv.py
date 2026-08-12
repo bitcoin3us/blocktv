@@ -63,6 +63,9 @@ LOGO_TAP_GRACE = 0.7        # ignore taps this long after the logo appears
 LOGO_ASSET_LIGHT = "blocktv_logo_light.png"
 LOGO_ASSET_DARK = "blocktv_logo_dark.png"
 APP_SITE = "www.ZapTV.org"
+# Broken by hand so the name never splits across the wrap.
+APP_CREDIT = "A fully open-source app\nby Richard Nakamoto"
+ABOUT_LOGO_SCALE = 166      # 256 = 100%, so ~65%
 _HW_ACRONYMS = ("lcd", "oled", "tft", "gps", "imu", "ir", "sd", "usb", "tv")
 # A move worth a second look, per range — scaled to what is ordinary for
 # each window, so a 3% day shouts and a 3% year does not. Past these the
@@ -1915,8 +1918,19 @@ class AboutActivity(Activity):
 
         site = lv.label(screen)
         site.set_text(APP_SITE)
-        site.set_style_text_font(FontManager.getFont(size=18), lv.PART.MAIN)
-        site.set_style_pad_top(8, lv.PART.MAIN)
+        site.set_style_text_font(FontManager.getFont(size=16), lv.PART.MAIN)
+        site.set_style_pad_top(4, lv.PART.MAIN)
+
+        credit = lv.label(screen)
+        credit.set_text(APP_CREDIT)
+        credit.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
+        credit.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+        credit.set_long_mode(lv.label.LONG_MODE.WRAP)
+        # Wrapped and centred, and kept clear of the floating back button
+        # in the corner it would otherwise run under.
+        credit.set_width(DisplayMetrics.width() - 60)
+        credit.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
+        credit.set_style_pad_top(2, lv.PART.MAIN)
 
         _add_floating_back(screen, self.finish)
 
@@ -1938,6 +1952,19 @@ class AboutActivity(Activity):
                 img.set_src(path)
                 img.update_layout()
                 if img.get_width() > 0:
+                    # The About page must fit the logo, three facts, the
+                    # site and the credit on 240 px without scrolling.
+                    # set_scale only scales what is DRAWN -- the widget
+                    # keeps reserving the full height -- so the box has to
+                    # be resized to match, or the layout gains nothing.
+                    try:
+                        w0, h0 = img.get_width(), img.get_height()
+                        img.set_scale(ABOUT_LOGO_SCALE)
+                        img.set_size(w0 * ABOUT_LOGO_SCALE // 256,
+                                     h0 * ABOUT_LOGO_SCALE // 256)
+                        img.update_layout()
+                    except Exception:
+                        pass                  # older binding: full size
                     return
                 img.set_src(None)
                 img.delete()
