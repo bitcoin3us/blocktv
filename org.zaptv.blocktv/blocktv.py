@@ -30,9 +30,9 @@ from fields import (
     FIELD_TITLES, MONTHS, WEEKDAYS, chart_series, render_field,
 )
 from market_data import (
-    MarketData, CURRENCIES, DEFAULT_BASE_URL, FINE_SLOT_SECONDS,
-    RANGE_REFRESH, RANGE_SPECS, extend_series, record_fine,
-    resample_fine, switch_currency,
+    MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
+    FINE_SLOT_SECONDS, FINE_SLOTS, RANGE_REFRESH, RANGE_SPECS,
+    extend_series, record_fine, resample_fine, switch_currency,
 )
 from odometer import Odometer
 from zap_service import ZapMonitor
@@ -412,6 +412,7 @@ class BlockTV(Activity):
         self._page_conts = {}
         self._page_tiles = {}
         self._chart_loading = {}
+        self._started_at = time.time()   # so a source that never reports ages
         self._history_active = False
         self._history_started = 0
         self._history_bytes = 0
@@ -628,6 +629,12 @@ class BlockTV(Activity):
     def _chart_freshness(self, field_id):
         """(stamp, cadence) for a chart field.
 
+        A 24h chart whose own 5-minute recording has filled the window
+        plots no hourly data at all, so it is judged by the price feed
+        that feeds the recording, not by a history fetch it isn't using.
+        Otherwise a failed history refresh would warn about a line that
+        is current to the last minute.
+
         Chart ranges are fetched independently and on very different
         cadences, so neither the shared "history" stamp nor the 60-second
         poll interval describes them. Using both was wrong in both
@@ -638,8 +645,18 @@ class BlockTV(Activity):
         if label is None:                      # not a chart: shared stamp
             return ((self.state.get("updated_at") or {}).get("history"),
                     self.refresh_seconds)
+        if label == DEFAULT_RANGE and self._fine_covers_window():
+            return ((self.state.get("updated_at") or {}).get("price"),
+                    self.refresh_seconds)
         return ((self.state.get("charts_ts") or {}).get(label),
                 RANGE_REFRESH.get(label, self.refresh_seconds))
+
+    def _fine_covers_window(self):
+        """True when the self-recorded series spans the whole 24 hours,
+        so the chart needs nothing from the hourly feed."""
+        fine = self.state.get("fine") or []
+        return (len(fine) >= FINE_SLOTS
+                and self.state.get("fine_currency") == self.state.get("currency"))
 
     def _stale_color(self, field_id):
         """Warning color for a field's title, or None when fresh.
@@ -656,7 +673,14 @@ class BlockTV(Activity):
             else:
                 stamp, cadence = stamps.get(source), self._source_cadence(source)
             if stamp is None:
-                continue
+                # Configured but never once reported — a relay that never
+                # connected, a wallet that never answered. Silence here
+                # would look identical to a healthy field with no news,
+                # so treat it as late from the moment the app started.
+                if source in ("nostr", "nwc"):
+                    stamp, cadence = self._started_at, self._source_cadence(source)
+                else:
+                    continue
             late = time.time() - stamp - cadence
             if worst is None or late > worst:
                 worst = late

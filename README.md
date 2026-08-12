@@ -189,7 +189,11 @@ turns orange when its data source is 10 minutes late and red at 24
 hours (warning hues adapt per theme so they stay visible). "Late" is
 measured against what each source actually promises, not a single
 clock: a 1y chart refreshes weekly and a 24h chart every 30 minutes, so
-each is judged against its own cadence and its own timestamp. When a zap
+each is judged against its own cadence and its own timestamp. A 24h
+chart whose own recording has filled the window is judged by the price
+feed instead, since at that point it plots no downloaded data at all. A
+nostr relay or wallet that is configured but has never once answered
+ages from startup rather than staying quietly blank. When a zap
 arrives, the whole display inverts for a few seconds with the amount
 and comment (Settings → **Zap Splash** to disable). Settings →
 **Screen Flash** can additionally flash the display briefly when a new
