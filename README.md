@@ -91,6 +91,14 @@ its currency, bold and full-strength in the top-right corner — the one
 thing the line cannot tell you. Charts sharing a screen with other
 fields leave it off, since the space is already spoken for.
 
+While a chart is fetching its data for the first time, the tile says so
+and counts the bytes as they arrive — "Loading 4y chart / 148 KB at
+22 KB/s" — because a megabyte over a badge's wifi is a long time to look
+at an empty rectangle. It reports bytes and rate rather than a
+percentage: the feed is hourly for its first stretch and daily beyond,
+so how much is left to read genuinely isn't known until it arrives, and
+an invented percentage would be worse than an honest number that moves.
+
 Lines are green when the price ends the range higher than it started
 and red when lower, judged per range — so a red day inside a green week
 shows exactly that. The move over the range is captioned in bold

@@ -411,6 +411,11 @@ class BlockTV(Activity):
         self._tile_labels = {}
         self._page_conts = {}
         self._page_tiles = {}
+        self._chart_loading = {}
+        self._history_active = False
+        self._history_started = 0
+        self._history_bytes = 0
+        self._history_rate = 0
         self._page_version = {}
         self._data_version = 0
         self._dots = []
@@ -724,6 +729,7 @@ class BlockTV(Activity):
         self._page_conts = {}
         self._page_tiles = {}
         self._page_version = {}
+        self._chart_loading = {}
         self._dots = []
         self._splash = None
         self._logo_overlay = None   # destroyed by screen.clean() above
@@ -933,6 +939,20 @@ class BlockTV(Activity):
         # the small one would resize the plot the moment a move crossed its
         # emphasis threshold.
         bottom = int((small + PILL_BUMP_BIG) * 1.15) + 10
+        # Sits where the plot will be, for the first fetch on a cold
+        # install: an empty tile looks broken, and a chart that costs a
+        # megabyte deserves to say so while it arrives.
+        loading = lv.label(tile)
+        loading.set_text("")
+        loading.set_style_text_font(FontManager.getFont(size=small), lv.PART.MAIN)
+        loading.set_style_text_color(self.fg, lv.PART.MAIN)
+        loading.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+        loading.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
+        loading.set_width(w - 16)
+        loading.align(lv.ALIGN.CENTER, 0, (top - bottom) // 2)
+        loading.add_flag(lv.obj.FLAG.HIDDEN)
+        self._chart_loading[field_id] = loading
+
         chart = lv.chart(tile)
         chart.set_size(w - 8, max(20, h - top - bottom))
         chart.align(lv.ALIGN.TOP_LEFT, 0, top)
@@ -1045,6 +1065,46 @@ class BlockTV(Activity):
         else:
             # Nothing plotted, nothing to badge — the chart is hidden too.
             sub.add_flag(lv.obj.FLAG.HIDDEN)
+        self._update_chart_loading(field_id, len(points) >= 2)
+
+    def _update_chart_loading(self, field_id, has_data):
+        """Show what the first fetch is doing, or get out of the way."""
+        label = self._chart_loading.get(field_id)
+        if label is None:
+            return
+        try:
+            if has_data:
+                label.add_flag(lv.obj.FLAG.HIDDEN)
+                return
+            label.set_text(self._loading_text(field_id))
+            label.remove_flag(lv.obj.FLAG.HIDDEN)
+        except Exception:
+            self._chart_loading.pop(field_id, None)   # widget went away
+
+    def _loading_text(self, field_id):
+        """Bytes and rate, not a percentage: the feed is hourly for its
+        first stretch and daily beyond, so how much is left to read is
+        genuinely unknown until it arrives. A number that moves is honest;
+        a percentage would be invented."""
+        label = CHART_LABELS.get(field_id, "24h")
+        done, rate = self._history_bytes, self._history_rate
+        if not self._history_active or done <= 0:
+            return "Loading {} chart...".format(label)
+        got = "{:.0f} KB".format(done / 1024.0)
+        if rate > 0:
+            return "Loading {} chart\n{} at {:.0f} KB/s".format(label, got, rate / 1024.0)
+        return "Loading {} chart\n{}".format(label, got)
+
+    def _history_progress(self, done):
+        """Called from the download as chunks land."""
+        now = time.time()
+        elapsed = now - self._history_started
+        self._history_bytes = done
+        self._history_rate = done / elapsed if elapsed > 0.2 else 0
+        for field_id in self._tile_labels:
+            if field_id in CHART_FIELDS and field_id in self._chart_loading:
+                if len(chart_series(field_id, self.state)) < 2:
+                    self._update_chart_loading(field_id, False)
 
     def _make_corner_clock(self, screen):
         """Small always-on clock and date, bottom-left. Part of the chrome,
@@ -1329,8 +1389,15 @@ class BlockTV(Activity):
         horizon = RANGE_SPECS[longest][0]
         # One pass fills every configured range within that horizon.
         covered = [lb for lb in labels if RANGE_SPECS[lb][0] <= horizon]
+        self._history_active = True
+        self._history_started = time.time()
+        self._history_bytes = 0
+        self._history_rate = 0
+        if self.has_foreground():
+            self._refresh_tiles()          # paint "Loading..." before the wait
         try:
-            if await self.market.fetch_history(self.state, currency, covered):
+            if await self.market.fetch_history(self.state, currency, covered,
+                                               progress=self._history_progress):
                 for lb in covered:
                     fetched[lb] = now
                 self._data_version += 1
@@ -1338,6 +1405,10 @@ class BlockTV(Activity):
                     self._refresh_tiles()
         except Exception as e:
             print("BlockTV: history refresh error: {}".format(e))
+        finally:
+            self._history_active = False
+            if self.has_foreground():
+                self._refresh_tiles()
 
     # --- Attention flash ---
 

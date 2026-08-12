@@ -271,6 +271,9 @@ def step_seconds(label):
 # in USD and ~58 in currencies that carry both local and USD prices, so
 # 80 bytes/hour leaves slack without letting a malformed feed run away.
 _BYTES_PER_HOUR = 80
+# How much must arrive before the loading indicator is updated again.
+# 4 KB is a few updates for a 24h fetch and a smooth count for a 4y one.
+_PROGRESS_EVERY = 4096
 _BYTES_FLOOR = 8192
 
 
@@ -444,21 +447,33 @@ class MarketData:
 
         return updated
 
-    async def fetch_history(self, state, currency="USD", labels=None):
+    async def fetch_history(self, state, currency="USD", labels=None,
+                            progress=None):
         """Fill state["charts"][label] for each requested chart range.
 
         Streams the newest-first feed, parsing and thinning as it goes,
         and stops as soon as the longest requested range is covered — so
         a 24h chart costs ~1 KB and a year ~276 KB, with memory flat
         either way. Ranges shorter than the one being fetched are filled
-        from the same pass for free."""
+        from the same pass for free.
+
+        progress(bytes_so_far) is called as the stream arrives, throttled
+        so a slow display update can never become the bottleneck for the
+        download it is reporting on."""
         collector = _HistoryCollector(currency, labels or [DEFAULT_RANGE])
         ceiling = max(_BYTES_FLOOR, collector.max_hours * _BYTES_PER_HOUR)
         size = 0
+        reported = 0
 
         async def on_chunk(chunk):
-            nonlocal size
+            nonlocal size, reported
             size += len(chunk)
+            if progress is not None and size - reported >= _PROGRESS_EVERY:
+                reported = size
+                try:
+                    progress(size)
+                except Exception:
+                    pass          # a failing indicator must not kill the fetch
             try:
                 text = chunk.decode("utf-8")
             except Exception:
