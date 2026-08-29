@@ -74,6 +74,8 @@ def _snapshot(state):
         "charts": {k: list(v) for k, v in (state.get("charts") or {}).items()},
         "charts_ts": dict(state.get("charts_ts") or {}),
         "fetched_at": dict(state.get("fetched_at") or {}),
+        "ath": state.get("ath"),
+        "ath_full": state.get("ath_full"),
     }
 
 
@@ -84,6 +86,8 @@ def _restore_snapshot(state, snap, currency):
     state["charts"] = {k: list(v) for k, v in (snap.get("charts") or {}).items()}
     state["charts_ts"] = dict(snap.get("charts_ts") or {})
     state["fetched_at"] = dict(snap.get("fetched_at") or {})
+    state["ath"] = snap.get("ath")
+    state["ath_full"] = snap.get("ath_full")
     state["fine_currency"] = currency
     state["charts_currency"] = currency
 
@@ -123,6 +127,8 @@ def switch_currency(state, currency):
         state["charts"] = {}
         state["charts_ts"] = {}
         state["fetched_at"] = {}
+        state["ath"] = None
+        state["ath_full"] = None
         state["fine_currency"] = currency
         state["charts_currency"] = currency
     state["series_currency"] = currency
@@ -166,6 +172,46 @@ def hourly_price_at(state, when):
     lo = int(pos)
     hi = min(lo + 1, len(hourly) - 1)
     return hourly[lo] + (hourly[hi] - hourly[lo]) * (pos - lo)
+
+
+def note_ath(state, price, currency=None, seed=False):
+    """Remember the highest price ever seen, in the working currency.
+
+    The record only ever rises, and is fed from two places. A history pass
+    reports the highest price it streamed past and may SEED the record,
+    because mempool's feed runs back to 2010 and a long-range fetch sweeps
+    the real all-time high for no extra bytes. The live spot price may only
+    RAISE an existing record, never establish one: seeding from it would
+    set the record to today's price, which is trivially >= itself, so the
+    app would announce an all-time high the first time it ever ran.
+
+    Returns True if a new record was set."""
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return False
+    if price <= 0:
+        return False
+    if currency and state.get("series_currency") not in (None, currency):
+        return False        # belongs to a currency we are not holding
+    best = state.get("ath")
+    if best is None:
+        if not seed:
+            return False
+        state["ath"] = price
+        return True
+    if price > best:
+        state["ath"] = price
+        return True
+    return False
+
+
+def at_all_time_high(state):
+    """True when the live price is at or above the record we hold."""
+    price, best = state.get("price"), state.get("ath")
+    if price is None or best is None:
+        return False
+    return float(price) >= float(best)
 
 
 def record_fine(state, max_age=None):
@@ -274,6 +320,9 @@ _BYTES_PER_HOUR = 80
 # How much must arrive before the loading indicator is updated again.
 # 4 KB is a few updates for a 24h fetch and a smooth count for a 4y one.
 _PROGRESS_EVERY = 4096
+# The whole feed is ~1 MB; allow slack without letting a runaway response
+# stream forever.
+_ATH_BYTE_CEILING = 6 * 1024 * 1024
 _BYTES_FLOOR = 8192
 
 
@@ -310,6 +359,10 @@ class _HistoryCollector:
             self.stride_h[lb] = max(1, (hours + cap - 1) // cap)
             self.last_bucket[lb] = -1
         self.max_hours = max(RANGE_SPECS[lb][0] for lb in self.labels)
+        # The highest price seen anywhere in this pass, whether or not it
+        # landed in a bucket. mempool's feed reaches back to 2010, so a
+        # long-range fetch sweeps past the real all-time high for free.
+        self.max_price = 0.0
         self.newest = None
         self.carry = ""
         self.done = False
@@ -348,6 +401,8 @@ class _HistoryCollector:
             return
         if self.newest is None:
             self.newest = t
+        if price > self.max_price:
+            self.max_price = price
         age_h = max(0, self.newest - t) // 3600
         if age_h >= self.max_hours:
             self.done = True
@@ -447,6 +502,76 @@ class MarketData:
 
         return updated
 
+    async def fetch_ath(self, state, currency="USD"):
+        """One pass over the WHOLE price history to find the real record.
+
+        Every other fetch stops at a horizon, so the record it seeds is
+        only the highest price inside that window -- a device showing just
+        a 24h chart would call this month's peak an all-time high. The feed
+        runs back to July 2010 and the whole thing is about 1 MB, roughly
+        what a single 4y chart refresh already costs, so this is worth
+        doing once per currency and then remembering.
+
+        Sets state["ath"] and marks state["ath_full"] so it never repeats.
+        Returns True if the record was established."""
+        key = '"%s":' % currency
+        best = 0.0
+        carry = ""
+        size = 0
+
+        async def on_chunk(chunk):
+            nonlocal best, carry, size
+            size += len(chunk)
+            if size > _ATH_BYTE_CEILING:
+                raise _EnoughHistory()
+            try:
+                carry += chunk.decode("utf-8")
+            except Exception:
+                return
+            while True:
+                start = carry.find(key)
+                if start < 0:
+                    # keep only a tail long enough to hold a split key
+                    carry = carry[-len(key):] if len(carry) > len(key) else carry
+                    break
+                vstart = start + len(key)
+                # The value ends at whichever terminator comes FIRST. In a
+                # single-currency feed the price is the last key in its
+                # object, so it ends with '}' and the next ',' belongs to
+                # the following entry -- taking the comma would parse
+                # "0.8999}" and silently drop almost every price.
+                comma = carry.find(",", vstart)
+                brace = carry.find("}", vstart)
+                ends = [i for i in (comma, brace) if i >= 0]
+                if not ends:
+                    carry = carry[start:]      # value split across chunks
+                    break
+                vend = min(ends)
+                try:
+                    v = float(carry[vstart:vend])
+                    if v > best:
+                        best = v
+                except ValueError:
+                    pass
+                carry = carry[vend:]
+
+        url = "{}/api/v1/historical-price?currency={}".format(self.base_url, currency)
+        try:
+            await DownloadManager.download_url(url, chunk_callback=on_chunk)
+        except _EnoughHistory:
+            pass
+        except Exception as e:
+            self.last_error = e
+            print("BlockTV: all-time-high scan failed: {}".format(e))
+            return False
+        if best <= 0:
+            return False
+        note_ath(state, best, currency, seed=True)
+        state["ath_full"] = currency
+        print("BlockTV: all-time high for {} is {} (scanned {} bytes)".format(
+            currency, best, size))
+        return True
+
     async def fetch_history(self, state, currency="USD", labels=None,
                             progress=None):
         """Fill state["charts"][label] for each requested chart range.
@@ -497,6 +622,8 @@ class MarketData:
         if not series:
             print("BlockTV: history produced no usable series")
             return False
+
+        note_ath(state, collector.max_price, currency, seed=True)
 
         charts = state.get("charts")
         if not isinstance(charts, dict) or state.get("charts_currency") != currency:

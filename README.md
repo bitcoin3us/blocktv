@@ -27,6 +27,7 @@ BlockTV — a clean, customisable Bitcoin dashboard app for
 | 30d Chart | Price line graph over the last 30 days | mempool.space API |
 | 1y Chart | Price line graph over the last year | mempool.space API |
 | 4y Chart | Price line graph over one halving cycle | mempool.space API |
+| ATH | Distance from the all-time high, and the record itself | mempool.space API |
 
 All five charts share one fetch. The hourly `historical-price` feed is
 newest-first, so reaching further back just means reading more of it —
@@ -119,6 +120,16 @@ The two priority fees come from a second, tiny endpoint
 of them is actually on a screen — the median comes from the mempool-blocks
 call and cannot be read off it. If that endpoint fails, every other
 reading still updates.
+
+On first run BlockTV reads the whole price feed once — back to July 2010,
+about 1 MB, roughly one 4y chart refresh — to learn the real all-time
+high, then remembers it. Every later fetch stops at a horizon, so
+without that pass the "record" would only be the highest price inside
+whatever window happened to be downloaded. The figure is kept per
+currency, because a euro price measured against a dollar record means
+nothing. When the price reaches it, a full-width **OPEN WATER BITCOIN**
+banner appears above the clock, carrying the range's change so nothing
+is lost where it covers a chart's trend pill.
 
 Derived fields need no extra requests — height and price are enough to
 compute moscow time, halving, supply and market cap on-device.

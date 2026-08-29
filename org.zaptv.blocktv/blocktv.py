@@ -32,7 +32,8 @@ from fields import (
 from market_data import (
     MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
     FINE_SLOT_SECONDS, FINE_SLOTS, RANGE_REFRESH, RANGE_SPECS,
-    extend_series, record_fine, resample_fine, switch_currency,
+    at_all_time_high, extend_series, note_ath, record_fine, resample_fine,
+    switch_currency,
 )
 from odometer import Odometer
 from zap_service import ZapMonitor
@@ -62,6 +63,16 @@ LOGO_TAP_GRACE = 0.7        # ignore taps this long after the logo appears
 # left alone) for dark ones.
 LOGO_ASSET_LIGHT = "blocktv_logo_light.png"
 LOGO_ASSET_DARK = "blocktv_logo_dark.png"
+ATH_TEXT = "OPEN WATER BITCOIN"
+ATH_YELLOW = 0xFFD400      # highlighter yellow; text is knocked out in black
+ATH_BAR_H = 24             # leaves the clock, dots and cog their own line
+ATH_SCAN_RETRY_SECONDS = 900   # if the one-off history scan fails, don't hammer
+# Spaces, not a bullet: bt_bold.ttf is an ASCII subset of Roboto Bold
+# and any punctuation outside ASCII renders as a tofu box.
+ATH_SCROLL_SEP = "          "
+ATH_SCROLL_PX_S = 45           # marquee speed; duration is derived from length
+                               # so a longer message scrolls at the same pace
+ATH_CHAR_PX = 9                # rough advance of the bold 16 px face
 APP_SITE = "www.ZapTV.org"
 # Broken by hand so the name never splits across the wrap.
 APP_CREDIT = "A fully open-source app\nby Richard Nakamoto"
@@ -416,6 +427,7 @@ class BlockTV(Activity):
         self._page_tiles = {}
         self._chart_loading = {}
         self._started_at = time.time()   # so a source that never reports ages
+        self._ath_scan_at = 0
         self._history_active = False
         self._history_started = 0
         self._history_bytes = 0
@@ -588,6 +600,8 @@ class BlockTV(Activity):
                 fine = resample_fine(fine, cached_slot, FINE_SLOT_SECONDS)
             state["fine"] = fine
             state["fine_ts"] = cached.get("fine_ts")
+            state["ath"] = cached.get("ath")
+            state["ath_full"] = cached.get("ath_full")
             state["charts"] = cached.get("charts") or {}
             state["charts_ts"] = dict(cached.get("charts_ts") or {})
             # Cached series are as fresh as their last sample, so don't
@@ -614,6 +628,8 @@ class BlockTV(Activity):
             "fine": self.state.get("fine") or [],
             "fine_ts": self.state.get("fine_ts"),
             "fine_slot": FINE_SLOT_SECONDS,
+            "ath": self.state.get("ath"),
+            "ath_full": self.state.get("ath_full"),
             "archive": self.state.get("archive") or {},
             "archive_order": self.state.get("archive_order") or [],
             "updated_at": self.state.get("updated_at") or {},
@@ -771,6 +787,7 @@ class BlockTV(Activity):
                             else max(4, width // 60))
         self._make_dots(screen, width, height, self._dots_space)
         self._make_settings_button(screen)
+        self._ath_bar = self._make_ath_bar(screen)
         screen.add_event_cb(self._on_key, lv.EVENT.KEY, None)
         group = lv.group_get_default()
         if group:
@@ -805,6 +822,7 @@ class BlockTV(Activity):
         elif "clock" in self._tile_labels:
             self._update_tile("clock")      # minutes tick regardless
         self._update_corner_clock()
+        self._update_ath_bar()
         self._update_dots()
 
     def _build_page(self, index):
@@ -1133,6 +1151,78 @@ class BlockTV(Activity):
                 if len(chart_series(field_id, self.state)) < 2:
                     self._update_chart_loading(field_id, False)
 
+    def _make_ath_bar(self, screen):
+        """Full-width highlight for a new all-time high.
+
+        Sits above the clock/dots/cog line rather than over it, and carries
+        the range's move at its end so nothing is lost when it covers a
+        chart's trend pill."""
+        bar = lv.label(screen)
+        bar.set_text("")
+        bar.set_width(lv.pct(100))
+        bar.set_style_bg_color(lv.color_hex(ATH_YELLOW), lv.PART.MAIN)
+        bar.set_style_bg_opa(lv.OPA.COVER, lv.PART.MAIN)
+        bar.set_style_text_color(lv.color_hex(_knockout(ATH_YELLOW)), lv.PART.MAIN)
+        bar.set_style_text_font(self._value_font(16), lv.PART.MAIN)
+        bar.set_style_pad_ver(3, lv.PART.MAIN)
+        bar.set_style_radius(0, lv.PART.MAIN)
+        # Circular scroll needs text wider than the label, so the message
+        # is repeated; LVGL then loops it without a visible restart.
+        bar.set_long_mode(lv.label.LONG_MODE.SCROLL_CIRCULAR)
+        bar.align(lv.ALIGN.BOTTOM_MID, 0, -ATH_BAR_H)
+        bar.add_flag(lv.obj.FLAG.HIDDEN)
+        return bar
+
+    def _ath_change_text(self):
+        """The move to print after the message: the chart on this page if
+        there is one, otherwise the day's."""
+        for field_id in self._tile_labels:
+            if field_id in CHART_FIELDS:
+                pct, _range = render_field(field_id, self.state)
+                if pct != "--":
+                    return pct
+        pct, _range = render_field("price_chart", self.state)
+        return pct if pct != "--" else ""
+
+    def _update_ath_bar(self):
+        """Show or hide the banner, and keep chart pills out from under it."""
+        bar = getattr(self, "_ath_bar", None)
+        if bar is None:
+            return
+        showing = at_all_time_high(self.state)
+        try:
+            if showing:
+                change = self._ath_change_text()
+                one = ATH_TEXT + ("   " + change if change else "")
+                # Two copies guarantee the label overflows its width at any
+                # message length, which is what starts the scroll.
+                text = (one + ATH_SCROLL_SEP) * 2
+                bar.set_text(text)
+                # Duration is for the whole travel, so scale it with the
+                # text or a longer message would simply scroll faster.
+                bar.set_style_anim_duration(
+                    max(2000, len(text) * ATH_CHAR_PX * 1000 // ATH_SCROLL_PX_S),
+                    lv.PART.MAIN)
+                bar.align(lv.ALIGN.BOTTOM_MID, 0, -ATH_BAR_H)
+                bar.remove_flag(lv.obj.FLAG.HIDDEN)
+                bar.move_foreground()
+            else:
+                bar.add_flag(lv.obj.FLAG.HIDDEN)
+        except Exception:
+            self._ath_bar = None          # widget went with a rebuild
+            return
+        # The pill would sit underneath; its number is in the banner now.
+        for field_id, tile in self._tile_labels.items():
+            if field_id in CHART_FIELDS:
+                sub = tile[2]
+                try:
+                    if showing:
+                        sub.add_flag(lv.obj.FLAG.HIDDEN)
+                    elif len(chart_series(field_id, self.state)) >= 2:
+                        sub.remove_flag(lv.obj.FLAG.HIDDEN)
+                except Exception:
+                    pass
+
     def _make_corner_clock(self, screen):
         """Small always-on clock and date, bottom-left. Part of the chrome,
         not a tile, so it stays put while pages turn. It shares the bottom
@@ -1223,6 +1313,7 @@ class BlockTV(Activity):
     def _refresh_tiles(self):
         for field_id in self._tile_labels:
             self._update_tile(field_id)
+        self._update_ath_bar()
 
     def _refresh_clock(self):
         try:
@@ -1259,6 +1350,7 @@ class BlockTV(Activity):
                 # Refresh the hourly feed first: after a restart it is what
                 # lets record_fine fill the missed slots with real prices
                 # instead of a straight line.
+                await self._maybe_scan_ath()
                 await self._maybe_fetch_history()
                 # Tolerance for "is this price a fresh observation?": a
                 # slot, or two poll intervals if the user has slowed the
@@ -1267,6 +1359,9 @@ class BlockTV(Activity):
                 record_fine(self.state,
                             max(FINE_SLOT_SECONDS, 2 * self.refresh_seconds))
                 extend_series(self.state)
+                # A new high should show the moment it prints, not at the
+                # next history fetch.
+                note_ath(self.state, self.state.get("price"))
             if self.keep_running and gen == self._loop_gen:
                 self._data_version += 1
             if self.keep_running and gen == self._loop_gen and self.has_foreground():
@@ -1393,6 +1488,29 @@ class BlockTV(Activity):
                 if field_id in CHART_FIELDS:
                     labels.add(CHART_LABELS.get(field_id, "24h"))
         return sorted(labels, key=lambda lb: RANGE_SPECS[lb][0])
+
+    async def _maybe_scan_ath(self):
+        """Establish the true all-time high, once per currency.
+
+        Every other fetch stops at a horizon, so the record it seeds is
+        only the highest price in that window. This reads the whole feed
+        (~1 MB, about one 4y chart refresh) so the figure is the real one
+        from July 2010 onwards, then never runs again for that currency.
+        A failure is retried on a slow cadence rather than every minute."""
+        currency = self.state.get("currency", "USD")
+        if self.state.get("ath_full") == currency:
+            return
+        now = time.time()
+        if now - self._ath_scan_at < ATH_SCAN_RETRY_SECONDS:
+            return
+        self._ath_scan_at = now
+        try:
+            if await self.market.fetch_ath(self.state, currency):
+                self._data_version += 1
+                if self.has_foreground():
+                    self._refresh_tiles()
+        except Exception as e:
+            print("BlockTV: all-time-high scan error: {}".format(e))
 
     async def _maybe_fetch_history(self):
         """Refresh chart data for the ranges actually on screen.

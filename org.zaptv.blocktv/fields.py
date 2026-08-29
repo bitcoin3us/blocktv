@@ -14,6 +14,7 @@ SATS_PER_BTC = 100_000_000
 FIELD_IDS = [
     "block_height",
     "spot_price",
+    "ath",
     "price_chart",
     "price_chart_7d",
     "price_chart_30d",
@@ -65,6 +66,7 @@ def chart_series(field_id, state):
 FIELD_TITLES = {
     "block_height": "Block Height",
     "spot_price": "Price",
+    "ath": "ATH",
     "price_chart": "24h Chart",
     "price_chart_7d": "7d Chart",
     "price_chart_30d": "30d Chart",
@@ -86,7 +88,7 @@ FIELD_TITLES = {
 # once; the check below fails the import rather than quietly hiding a field
 # from the picker if one is ever added to FIELD_IDS and not to a group.
 FIELD_CATEGORIES = (
-    ("Price", ("spot_price", "price_chart", "price_chart_7d",
+    ("Price", ("spot_price", "ath", "price_chart", "price_chart_7d",
                "price_chart_30d", "price_chart_1y", "price_chart_4y", "market_cap")),
     # Grouped by what they read like, not where the number comes from:
     # moscow time is price-derived but shown as a clock, and that is how
@@ -115,6 +117,7 @@ PLACEHOLDER = "--"
 FIELD_SOURCES = {
     "block_height": ("height",),
     "spot_price": ("price",),
+    "ath": ("price",),
     "price_chart": ("history",),
     "price_chart_7d": ("history",),
     "price_chart_30d": ("history",),
@@ -207,6 +210,15 @@ def render_field(field_id, state):
         if price is None:
             return PLACEHOLDER, currency
         return fmt_int(round(price)), currency
+
+    if field_id == "ath":
+        best = state.get("ath")
+        if price is None or not best:
+            return PLACEHOLDER, "from record high"
+        gap = (price - best) / best * 100.0
+        if gap >= 0:
+            return "AT HIGH", "%s %s" % (fmt_int(round(best)), currency)
+        return "%.1f%%" % gap, "from %s" % fmt_int(round(best))
 
     if field_id in CHART_FIELDS:
         label = CHART_LABELS.get(field_id, "24h")
