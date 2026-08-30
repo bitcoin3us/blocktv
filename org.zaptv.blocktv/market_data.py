@@ -215,7 +215,7 @@ def at_all_time_high(state):
 
 
 def record_fine(state, max_age=None):
-    """Fold the freshly polled spot price into the 10-minute series.
+    """Fold the freshly polled spot price into the 5-minute series.
 
     One value per slot (the latest sample wins). Slots missed while the
     app wasn't running are filled from the hourly feed — real prices —
@@ -278,7 +278,7 @@ def record_fine(state, max_age=None):
 
 
 def fine_series(state):
-    """The 24h series to plot: self-recorded 10-minute samples where they
+    """The 24h series to plot: self-recorded 5-minute samples where they
     exist, with the older remainder of the window filled in from the
     hourly feed, so the chart always spans a full 24 hours."""
     fine = state.get("fine") or []
@@ -289,7 +289,13 @@ def fine_series(state):
 
     hourly = (state.get("charts") or {}).get("24h") or []
     if len(hourly) < 2:
-        return fine if len(fine) >= 2 else []
+        # Nothing to back-fill the older part of the window with yet. The
+        # handful of samples recorded since launch is minutes of data, not
+        # a day, and plotting it here would colour the line and print the
+        # percentage off a window far shorter than the one the chart is
+        # labelled with - a morning dip reads as a red day. Hold the
+        # loading indicator until the hourly feed lands.
+        return []
     if len(fine) < 2:
         return hourly
 

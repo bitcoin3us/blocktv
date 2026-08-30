@@ -51,7 +51,7 @@ CHART_LABELS = {
 def chart_series(field_id, state):
     """The price series a chart field plots, oldest-first.
 
-    The 24h chart prefers the app's own 10-minute recording (six times
+    The 24h chart prefers the app's own 5-minute recording (twelve times
     the detail of the hourly feed) and falls back to the feed until that
     has filled in."""
     label = CHART_LABELS.get(field_id, "24h")
