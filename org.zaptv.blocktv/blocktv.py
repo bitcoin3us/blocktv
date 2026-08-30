@@ -580,6 +580,10 @@ class BlockTV(Activity):
         for key in ("height", "fee", "fee_low", "fee_high", "balance", "zap"):
             if state.get(key) is None and cached.get(key) is not None:
                 state[key] = cached[key]
+        # The FX rate names its own currency and carries its own age, so
+        # it restores unconditionally and expires on its own terms.
+        if cached.get("fx"):
+            state["fx"] = cached["fx"]
 
         # Currency-specific series: load them exactly as they were saved,
         # archive included, then switch to the configured currency — which
@@ -630,6 +634,7 @@ class BlockTV(Activity):
             "fine_slot": FINE_SLOT_SECONDS,
             "ath": self.state.get("ath"),
             "ath_full": self.state.get("ath_full"),
+            "fx": self.state.get("fx"),
             "archive": self.state.get("archive") or {},
             "archive_order": self.state.get("archive_order") or [],
             "updated_at": self.state.get("updated_at") or {},

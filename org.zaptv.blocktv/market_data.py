@@ -9,7 +9,28 @@ from mpos import DownloadManager
 
 DEFAULT_BASE_URL = "https://mempool.space"
 
-CURRENCIES = ("USD", "EUR", "GBP", "CAD", "CHF", "AUD", "JPY")
+CURRENCIES = ("USD", "EUR", "GBP", "CAD", "CHF", "AUD", "JPY",
+              "CNY", "DKK", "NOK", "NZD", "SEK")
+
+# mempool.space quotes bitcoin in the first seven of those. The rest are
+# derived: every fetch reads the USD feed and multiplies by a daily ECB
+# reference rate, so any currency the ECB publishes can be added to the
+# lists above with no further code. The conversion is exact for today's
+# price and for every percentage (a constant factor cancels out); what it
+# approximates is the absolute height of OLD chart samples and the ATH
+# figure, which are converted at today's rate rather than the rate of
+# their day. FX drift is a rounding error next to bitcoin's own moves.
+DERIVED_CURRENCIES = ("CNY", "DKK", "NOK", "NZD", "SEK")
+FX_URL = "https://api.frankfurter.dev/v1/latest?base=USD&symbols={}"
+# ECB reference rates update once per working day; over a weekend the
+# newest rate is simply Friday's, so a long shelf life is correct, not
+# lazy.
+FX_MAX_AGE = 12 * 3600
+
+
+def feed_currency(currency):
+    """The currency actually requested from the price feed."""
+    return "USD" if currency in DERIVED_CURRENCIES else currency
 
 # Chart ranges: label -> (hours covered, max points kept).
 #
@@ -447,6 +468,31 @@ class MarketData:
         data = await DownloadManager.download_url(self.base_url + path)
         return json.loads(data)
 
+    async def _fx_rate(self, state, currency):
+        """USD -> `currency` multiplier, or None when it cannot be had.
+
+        1.0 for the feed's own currencies. For a derived one the cached
+        rate is reused within FX_MAX_AGE; past that a fresh one is
+        fetched, and if the rate service is unreachable the stale rate
+        still wins over losing the price entirely -- FX drifts by
+        fractions of a percent while bitcoin moves by whole ones."""
+        if currency not in DERIVED_CURRENCIES:
+            return 1.0
+        fx = state.get("fx") or {}
+        have = fx.get("cur") == currency and fx.get("rate")
+        if have and time.time() - (fx.get("ts") or 0) < FX_MAX_AGE:
+            return fx["rate"]
+        try:
+            data = await DownloadManager.download_url(FX_URL.format(currency))
+            rate = float(json.loads(data)["rates"][currency])
+            if rate > 0:
+                state["fx"] = {"cur": currency, "rate": rate,
+                               "ts": time.time()}
+                return rate
+        except Exception as e:
+            print("BlockTV: FX rate fetch failed: {}".format(e))
+        return fx["rate"] if have else None
+
     async def fetch(self, state, currency="USD", want_priority_fees=False):
         """Update state in place. Returns True if anything was updated.
         Each successful endpoint stamps state["updated_at"][source] so the
@@ -465,10 +511,14 @@ class MarketData:
             print("BlockTV: height fetch failed: {}".format(e))
 
         try:
+            rate = await self._fx_rate(state, currency)
             prices = await self._get_json("/api/v1/prices")
-            price = prices.get(currency)
-            if price:
-                state["price"] = float(price)
+            price = prices.get(feed_currency(currency))
+            # No rate means a derived currency with nothing to convert
+            # by; better no price (the UI shows loading/stale) than a USD
+            # number wearing the wrong label.
+            if price and rate:
+                state["price"] = float(price) * rate
                 stamps["price"] = time.time()
                 updated = True
         except Exception as e:
@@ -520,7 +570,11 @@ class MarketData:
 
         Sets state["ath"] and marks state["ath_full"] so it never repeats.
         Returns True if the record was established."""
-        key = '"%s":' % currency
+        rate = await self._fx_rate(state, currency)
+        if rate is None:
+            print("BlockTV: all-time-high scan needs an FX rate it can't get")
+            return False
+        key = '"%s":' % feed_currency(currency)
         best = 0.0
         carry = ""
         size = 0
@@ -561,7 +615,8 @@ class MarketData:
                     pass
                 carry = carry[vend:]
 
-        url = "{}/api/v1/historical-price?currency={}".format(self.base_url, currency)
+        url = "{}/api/v1/historical-price?currency={}".format(
+            self.base_url, feed_currency(currency))
         try:
             await DownloadManager.download_url(url, chunk_callback=on_chunk)
         except _EnoughHistory:
@@ -572,6 +627,7 @@ class MarketData:
             return False
         if best <= 0:
             return False
+        best *= rate
         note_ath(state, best, currency, seed=True)
         state["ath_full"] = currency
         print("BlockTV: all-time high for {} is {} (scanned {} bytes)".format(
@@ -591,7 +647,12 @@ class MarketData:
         progress(bytes_so_far) is called as the stream arrives, throttled
         so a slow display update can never become the bottleneck for the
         download it is reporting on."""
-        collector = _HistoryCollector(currency, labels or [DEFAULT_RANGE])
+        rate = await self._fx_rate(state, currency)
+        if rate is None:
+            print("BlockTV: history fetch needs an FX rate it can't get")
+            return False
+        collector = _HistoryCollector(feed_currency(currency),
+                                      labels or [DEFAULT_RANGE])
         ceiling = max(_BYTES_FLOOR, collector.max_hours * _BYTES_PER_HOUR)
         size = 0
         reported = 0
@@ -615,7 +676,8 @@ class MarketData:
             if collector.feed(text) or size >= ceiling:
                 raise _EnoughHistory()
 
-        url = "{}/api/v1/historical-price?currency={}".format(self.base_url, currency)
+        url = "{}/api/v1/historical-price?currency={}".format(
+            self.base_url, feed_currency(currency))
         try:
             await DownloadManager.download_url(url, chunk_callback=on_chunk)
         except _EnoughHistory:
@@ -629,7 +691,10 @@ class MarketData:
             print("BlockTV: history produced no usable series")
             return False
 
-        note_ath(state, collector.max_price, currency, seed=True)
+        if rate != 1.0:
+            series = {lb: [v * rate for v in vals]
+                      for lb, vals in series.items()}
+        note_ath(state, collector.max_price * rate, currency, seed=True)
 
         charts = state.get("charts")
         if not isinstance(charts, dict) or state.get("charts_currency") != currency:
