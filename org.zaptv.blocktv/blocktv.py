@@ -31,9 +31,9 @@ from fields import (
 )
 from market_data import (
     MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
-    FINE_SLOT_SECONDS, FINE_SLOTS, RANGE_REFRESH, RANGE_SPECS,
-    at_all_time_high, extend_series, note_ath, record_fine, resample_fine,
-    switch_currency,
+    DERIVED_CURRENCIES, FINE_SLOT_SECONDS, FINE_SLOTS, RANGE_REFRESH,
+    RANGE_SPECS, at_all_time_high, extend_series, note_ath, record_fine,
+    resample_fine, switch_currency,
 )
 from odometer import Odometer
 from zap_service import ZapMonitor
@@ -1834,9 +1834,10 @@ class MainSettingsActivity(SettingsActivity):
             {"title": "Nostr", "ui": "activity",
              "activity_class": NostrSettingsActivity,
              "placeholder": "Zaps, relays, wallet connect", "key": "_nostr"},
-            {"title": "Currency", "key": "currency", "ui": "dropdown",
-             "default_value": "USD",
-             "ui_options": [(c, c) for c in CURRENCIES]},
+            {"title": "Currency", "key": "currency", "ui": "activity",
+             "activity_class": CurrencySettingsActivity,
+             "placeholder": self.prefs.get_string("currency", "USD")
+             if self.prefs else "USD"},
             {"title": "Refresh Interval", "ui": "activity",
              "activity_class": RefreshSettingsActivity,
              "placeholder": "", "key": "refresh_seconds"},
@@ -2014,6 +2015,76 @@ class CustomiseSettingsActivity(SettingsActivity):
         # floating return button has to be re-added after it.
         super().onResume(screen)
         _add_floating_back(screen, self.finish)
+
+
+class CurrencySettingsActivity(Activity):
+    """Pick the display currency, with its provenance on the same page.
+
+    mempool.space quotes seven currencies directly; the rest are marked
+    (indirect) because the app converts the USD quote itself. That
+    difference is worth a line of honesty on the page where the choice
+    is made, not a surprise buried in the README."""
+
+    def onCreate(self):
+        extras = self.getIntent().extras or {}
+        self.prefs = extras.get("prefs")
+        self.setting = extras.get("setting") or {}
+        screen = lv.obj()
+        screen.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
+        screen.set_flex_flow(lv.FLEX_FLOW.COLUMN)
+        screen.set_style_pad_row(6, lv.PART.MAIN)
+        screen.set_style_border_width(0, lv.PART.MAIN)
+        self.setContentView(screen)
+
+    def onResume(self, screen):
+        super().onResume(screen)
+        screen.clean()
+        current = self.prefs.get_string("currency", "USD") if self.prefs else "USD"
+
+        title = lv.label(screen)
+        title.set_text("Currency")
+        title.set_style_text_font(FontManager.getFont(size=18), lv.PART.MAIN)
+
+        for code in CURRENCIES:
+            row = lv.obj(screen)
+            row.set_width(lv.pct(100))
+            row.set_height(lv.SIZE_CONTENT)
+            row.set_style_border_width(1, lv.PART.MAIN)
+            row.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
+            row.add_flag(lv.obj.FLAG.CLICKABLE)
+            row.remove_flag(lv.obj.FLAG.SCROLLABLE)
+            name = lv.label(row)
+            name.set_text("{} (indirect)".format(code)
+                          if code in DERIVED_CURRENCIES else code)
+            name.align(lv.ALIGN.LEFT_MID, 0, 0)
+            if code == current:
+                tick = lv.label(row)
+                tick.set_text(lv.SYMBOL.OK)
+                tick.align(lv.ALIGN.RIGHT_MID, 0, 0)
+            row.add_event_cb(lambda e, c=code: self._pick(c),
+                             lv.EVENT.CLICKED, None)
+            add_focus_border(row)
+
+        note = lv.label(screen)
+        note.set_text(
+            "Data source: mempool.space\n"
+            "(indirect): mempool.space USD price converted at the ECB "
+            "daily reference rate from api.frankfurter.dev")
+        note.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
+        note.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+        note.set_long_mode(lv.label.LONG_MODE.WRAP)
+        note.set_width(lv.pct(96))
+
+        _add_floating_back(screen, self.finish)
+
+    def _pick(self, code):
+        if self.prefs:
+            editor = self.prefs.edit()
+            editor.put_string("currency", code)
+            editor.commit()
+        # The settings list re-renders on resume and shows this row text.
+        self.setting["placeholder"] = code
+        self.finish()
 
 
 class AboutActivity(Activity):
