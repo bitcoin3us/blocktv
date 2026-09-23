@@ -1,3 +1,11 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ZapTV.org
+# Part of zaptv-lib (https://github.com/bitcoin3us/zaptv-lib): MIT-licensed
+# modules shared by the ZapTV family of MicroPythonOS apps.
+# Derived from Lightning Piggy's nostr_service.py in MicroPythonOS,
+# Copyright (c) 2025 MicroPythonOS (Thomas Farstrike), MIT License.
+# Modifications Copyright (c) 2026 ZapTV.org.
+
 import ssl
 import json
 import time

@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ZapTV.org
+#
+# This file is part of BlockTV. BlockTV is free software: you can redistribute
+# it and/or modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version. It is distributed WITHOUT
+# ANY WARRANTY; see the GNU General Public License (LICENSE) for details.
+
 # BlockTV — a clean, customisable Bitcoin dashboard for MicroPythonOS.
 #
 # Data fields: block height, spot price, moscow time, halving countdown,
@@ -37,6 +46,9 @@ from market_data import (
 )
 from odometer import Odometer
 from zap_service import ZapMonitor
+from field_picker import (
+    FieldPickerActivity, button_row, row_button, no_scroll_chain,
+)
 
 # Defaults chosen by probing each relay for kind-9735 zap receipts, not
 # just for a successful handshake: relay.damus.io accepted the connection
@@ -76,6 +88,8 @@ ATH_CHAR_PX = 9                # rough advance of the bold 16 px face
 APP_SITE = "www.ZapTV.org"
 # Broken by hand so the name never splits across the wrap.
 APP_CREDIT = "A fully open-source app\nby Richard Nakamoto"
+APP_LICENSE = ("Free software: GNU GPL v3 or later, no warranty.\n"
+               "Shared modules from zaptv-lib (MIT).")
 ABOUT_LOGO_SCALE = 166      # 256 = 100%, so ~65%
 _HW_ACRONYMS = ("lcd", "oled", "tft", "gps", "imu", "ir", "sd", "usb", "tv")
 # A move worth a second look, per range — scaled to what is ordinary for
@@ -287,48 +301,6 @@ def fit_size(text, max_w, max_h):
     """Largest font size whose text fits max_w wide and max_h tall."""
     length = max(1, len(text))
     return max(12, min(int(max_h), int(max_w / (_CHAR_WIDTH_FACTOR * length))))
-
-
-def _button_row(parent):
-    """Transparent horizontal container so two buttons share one line
-    instead of each eating a row of scroll space."""
-    row = lv.obj(parent)
-    row.set_width(lv.pct(100))
-    row.set_height(lv.SIZE_CONTENT)
-    row.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
-    row.set_style_border_width(0, lv.PART.MAIN)
-    row.set_style_pad_all(0, lv.PART.MAIN)
-    row.set_style_pad_column(6, lv.PART.MAIN)
-    row.set_flex_flow(lv.FLEX_FLOW.ROW)
-    row.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
-    row.remove_flag(lv.obj.FLAG.SCROLLABLE)
-    return row
-
-
-def _row_button(row, text, on_click, grow=1):
-    btn = lv.button(row)
-    btn.set_flex_grow(grow)
-    btn.add_event_cb(lambda e: on_click(), lv.EVENT.CLICKED, None)
-    # Joins the focus group: on a device with no touchscreen this is the
-    # only way the button can be reached at all.
-    add_focus_border(btn)
-    label = lv.label(btn)
-    label.set_text(text)
-    label.center()
-    return btn
-
-
-def _no_scroll_chain(obj):
-    """Stop a drag on this widget from scrolling the page behind it.
-
-    LVGL hands an unhandled scroll gesture up to the nearest scrollable
-    ancestor; the field editor scrolls, so without this a slide meant to
-    reorder would take the whole list with it."""
-    for flag in ("SCROLL_CHAIN_VER", "SCROLL_CHAIN"):
-        value = getattr(lv.obj.FLAG, flag, None)
-        if value is not None:
-            obj.remove_flag(value)
-            return
 
 
 def _add_floating_back(screen, on_click):
@@ -2126,6 +2098,16 @@ class AboutActivity(Activity):
         credit.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
         credit.set_style_pad_top(2, lv.PART.MAIN)
 
+        # GPL section 5(d): an interactive program shows its legal notices.
+        licence = lv.label(screen)
+        licence.set_text(APP_LICENSE)
+        licence.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
+        licence.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+        licence.set_long_mode(lv.label.LONG_MODE.WRAP)
+        licence.set_width(DisplayMetrics.width() - 60)
+        licence.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
+        licence.set_style_pad_top(6, lv.PART.MAIN)
+
         _add_floating_back(screen, self.finish)
 
     def _add_logo(self, screen):
@@ -2169,7 +2151,7 @@ class AboutActivity(Activity):
         label.set_style_text_font(FontManager.getFont(size=28), lv.PART.MAIN)
 
     def _add_fact(self, screen, name, value):
-        row = _button_row(screen)
+        row = button_row(screen)
         row.set_flex_align(lv.FLEX_ALIGN.SPACE_BETWEEN, lv.FLEX_ALIGN.CENTER,
                            lv.FLEX_ALIGN.CENTER)
         left = lv.label(row)
@@ -2243,8 +2225,8 @@ class ScreensSettingsActivity(Activity):
         # every other settings page here uses. Add takes the row, minus
         # the corner that button floats over — otherwise the end of a
         # full-width Add would sit exactly under it and mis-tap as Back.
-        actions = _button_row(screen)
-        _row_button(actions, lv.SYMBOL.PLUS + "  Add", self._add_screen, grow=1)
+        actions = button_row(screen)
+        row_button(actions, lv.SYMBOL.PLUS + "  Add", self._add_screen, grow=1)
         spacer = lv.obj(actions)
         spacer.set_size(50, 1)
         spacer.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
@@ -2263,295 +2245,17 @@ class ScreensSettingsActivity(Activity):
         self._edit_screen(len(load_screens(self.prefs)))
 
 
-class ScreenEditActivity(Activity):
-    """Which fields appear on this screen, and in what order.
+class ScreenEditActivity(FieldPickerActivity):
+    """BlockTV's screen editor: the shared field picker wired to this
+    app's field registry and its screens_json preference."""
 
-    One screen: the chosen fields sit at the top in the order they will
-    be laid out, draggable by their handles, and the rest are listed
-    below by category. Changes are held in memory and only persisted by
-    the Save button; backing out without saving discards them."""
+    CATEGORIES = FIELD_CATEGORIES
+    TITLES = FIELD_TITLES
+    MAX_FIELDS = MAX_FIELDS_PER_SCREEN
+    DEFAULT_FIELD = "block_height"
 
-    ROW_H = 30
+    def load_screens(self, prefs):
+        return load_screens(prefs)
 
-    def onCreate(self):
-        extras = self.getIntent().extras or {}
-        self.prefs = extras.get("prefs")
-        self.index = extras.get("index", 0)
-        self._selected = []
-        self._is_new = False
-        self._loaded = False
-        self._rows = []
-        self._drag_idx = None
-        self._drag_target = 0
-        self._drag_y0 = 0
-        self._row_h = 30
-        screen = lv.obj()
-        screen.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
-        screen.set_flex_flow(lv.FLEX_FLOW.COLUMN)
-        screen.set_style_border_width(0, lv.PART.MAIN)
-        self._screen = screen
-        self.setContentView(screen)
-
-    def onResume(self, screen):
-        super().onResume(screen)
-        self._screen = screen
-        if not self._loaded:
-            # Only on the way in: re-reading here would throw away the
-            # edits made before switching modes.
-            screens = load_screens(self.prefs)
-            self._is_new = self.index >= len(screens)
-            self._selected = (["block_height"] if self._is_new
-                              else list(screens[self.index]))
-            self._loaded = True
-        self._render()
-
-    def _render(self):
-        screen = self._screen
-        # Selecting a field rebuilds the list; without this the view would
-        # jump back to the top on every tap.
-        screen.update_layout()
-        keep_scroll = screen.get_scroll_y()
-        screen.clean()
-        self._drag_idx = None
-        self._rows = []
-
-        header = lv.label(screen)
-        header.set_text("New screen" if self._is_new
-                        else "Screen {} fields".format(self.index + 1))
-        header.set_style_text_font(FontManager.getFont(size=18), lv.PART.MAIN)
-
-        self._render_selected(screen)
-        for name, field_ids in FIELD_CATEGORIES:
-            available = [f for f in field_ids if f not in self._selected]
-            if not available:
-                continue
-            self._section(screen, name)
-            for field_id in available:
-                self._available_row(screen, field_id)
-
-        actions = _button_row(screen)
-        _row_button(actions, lv.SYMBOL.CLOSE + "  Cancel", self.finish, grow=1)
-        _row_button(actions, lv.SYMBOL.OK + "  Save", self._save, grow=2)
-
-        if not self._is_new and len(load_screens(self.prefs)) > 1:
-            delete_btn = lv.button(screen)
-            delete_btn.set_width(lv.pct(100))
-            delete_btn.add_event_cb(self._delete_screen, lv.EVENT.CLICKED, None)
-            add_focus_border(delete_btn)
-            delete_label = lv.label(delete_btn)
-            delete_label.set_text(lv.SYMBOL.TRASH + "  Delete Screen")
-            delete_label.center()
-
-        screen.update_layout()
-        screen.scroll_to_y(keep_scroll, 0)
-
-    def _section(self, screen, text):
-        label = lv.label(screen)
-        label.set_text(text.upper())
-        label.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
-        label.set_style_text_opa(lv.OPA._50, lv.PART.MAIN)
-        label.set_style_text_letter_space(1, lv.PART.MAIN)
-        label.set_style_pad_top(4, lv.PART.MAIN)
-
-    def _available_row(self, screen, field_id):
-        """An unselected field: tap to move it up into Selected."""
-        row = lv.obj(screen)
-        row.set_width(lv.pct(100))
-        row.set_height(self.ROW_H - 3)
-        row.set_style_pad_all(0, lv.PART.MAIN)
-        row.set_style_border_width(0, lv.PART.MAIN)
-        row.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
-        row.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
-        row.remove_flag(lv.obj.FLAG.SCROLLABLE)
-        row.add_flag(lv.obj.FLAG.CLICKABLE)
-        row.add_event_cb(lambda e, f=field_id: self._select(f),
-                         lv.EVENT.CLICKED, None)
-        add_focus_border(row)
-        name = lv.label(row)
-        name.set_text(lv.SYMBOL.PLUS + "  " + FIELD_TITLES.get(field_id, field_id))
-        name.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
-        name.align(lv.ALIGN.LEFT_MID, 6, 0)
-
-    def _render_selected(self, screen):
-        """The chosen fields, in the order they will be laid out.
-
-        Rows live in a fixed-height container with scroll chaining off, so
-        sliding one reorders instead of scrolling the page behind it — the
-        reason this can share a screen with the full field list at all."""
-        self._section(screen, "Selected")
-        n = len(self._selected)
-        cont = lv.obj(screen)
-        cont.set_width(lv.pct(100))
-        cont.set_height(self.ROW_H * n)
-        cont.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
-        cont.set_style_border_width(0, lv.PART.MAIN)
-        cont.set_style_pad_all(0, lv.PART.MAIN)
-        cont.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
-        cont.remove_flag(lv.obj.FLAG.SCROLLABLE)
-        _no_scroll_chain(cont)
-
-        for i, field_id in enumerate(self._selected):
-            row = lv.obj(cont)
-            row.set_size(lv.pct(100), self.ROW_H - 3)
-            row.set_pos(0, i * self.ROW_H)
-            row.set_style_border_width(1, lv.PART.MAIN)
-            row.set_style_radius(4, lv.PART.MAIN)
-            row.set_style_pad_all(0, lv.PART.MAIN)
-            row.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
-            row.remove_flag(lv.obj.FLAG.SCROLLABLE)
-            row.add_flag(lv.obj.FLAG.CLICKABLE)
-            _no_scroll_chain(row)
-
-            name = lv.label(row)
-            name.set_text("{}  {}".format(i + 1,
-                                          FIELD_TITLES.get(field_id, field_id)))
-            name.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
-            name.align(lv.ALIGN.LEFT_MID, 6, 0)
-
-            # A button, not just an ornament: tapping or ENTERing it moves
-            # the field one place down (wrapping at the end), which is the
-            # only way to reorder without a touchscreen to drag on. A drag
-            # started on the row body still works as before.
-            grip = lv.button(row)
-            grip.set_size(26, self.ROW_H - 5)
-            grip.align(lv.ALIGN.RIGHT_MID, -2, 0)
-            grip.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
-            grip.set_style_shadow_width(0, lv.PART.MAIN)
-            grip.add_event_cb(lambda e, f=field_id: self._nudge(f),
-                              lv.EVENT.CLICKED, None)
-            add_focus_border(grip)
-            grip_icon = lv.label(grip)
-            grip_icon.set_text(lv.SYMBOL.LIST)
-            grip_icon.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
-            grip_icon.set_style_text_opa(lv.OPA._50, lv.PART.MAIN)
-            grip_icon.center()
-
-            # Its own button, so pressing it never starts a drag: LVGL
-            # delivers the press to the topmost object under the finger.
-            drop = lv.button(row)
-            drop.set_size(28, self.ROW_H - 5)
-            drop.align(lv.ALIGN.RIGHT_MID, -30, 0)
-            drop.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
-            drop.set_style_shadow_width(0, lv.PART.MAIN)
-            drop.add_event_cb(lambda e, f=field_id: self._deselect(f),
-                              lv.EVENT.CLICKED, None)
-            add_focus_border(drop)
-            cross = lv.label(drop)
-            cross.set_text(lv.SYMBOL.CLOSE)
-            cross.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
-            cross.center()
-
-            row.add_event_cb(lambda e, i=i: self._drag_start(i),
-                             lv.EVENT.PRESSED, None)
-            row.add_event_cb(lambda e: self._drag_move(),
-                             lv.EVENT.PRESSING, None)
-            row.add_event_cb(lambda e: self._drag_end(),
-                             lv.EVENT.RELEASED, None)
-            # Without this a drag that slips off the row leaves the list
-            # stuck mid-reorder.
-            row.add_event_cb(lambda e: self._drag_end(),
-                             lv.EVENT.PRESS_LOST, None)
-            self._rows.append(row)
-
-        if n > 1:
-            hint = lv.label(screen)
-            hint.set_text("Drag to reorder or tap " + lv.SYMBOL.LIST
-                          + " to move down, " + lv.SYMBOL.CLOSE + " to remove.")
-            hint.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
-            hint.set_style_text_opa(lv.OPA._50, lv.PART.MAIN)
-
-    def _select(self, field_id):
-        if field_id in self._selected:
-            return
-        if len(self._selected) >= MAX_FIELDS_PER_SCREEN:
-            return
-        # Appended, not sorted: the order is the user's to set.
-        self._selected = list(self._selected) + [field_id]
-        self._render()
-
-    def _deselect(self, field_id):
-        if len(self._selected) <= 1:
-            return                     # a screen must keep at least one field
-        self._selected = [f for f in self._selected if f != field_id]
-        self._render()
-
-    def _nudge(self, field_id):
-        """Move a field one place down, wrapping to the top from the end.
-
-        Repeated presses walk it to any position, so the whole ordering is
-        reachable from a keypad without a drag.
-        """
-        if field_id not in self._selected or len(self._selected) < 2:
-            return
-        i = self._selected.index(field_id)
-        self._selected.pop(i)
-        self._selected.insert((i + 1) % (len(self._selected) + 1), field_id)
-        self._render()
-
-    def _pointer_y(self):
-        indev = lv.indev_active()
-        if indev is None:
-            return None
-        point = lv.point_t()
-        indev.get_point(point)
-        return point.y
-
-    def _drag_start(self, index):
-        y = self._pointer_y()
-        if y is None or index >= len(self._rows):
-            return
-        self._drag_idx = index
-        self._drag_target = index
-        self._drag_y0 = y
-        self._rows[index].move_foreground()
-
-    def _drag_move(self):
-        if self._drag_idx is None:
-            return
-        y = self._pointer_y()
-        if y is None:
-            return
-        offset = y - self._drag_y0
-        self._rows[self._drag_idx].set_y(self._drag_idx * self.ROW_H + offset)
-        target = self._drag_idx + int(round(offset / float(self.ROW_H)))
-        target = max(0, min(len(self._rows) - 1, target))
-        if target != self._drag_target:
-            self._drag_target = target
-            self._open_slot()
-
-    def _open_slot(self):
-        """Lay the untouched rows out around an empty slot at the target,
-        so the gap shows where the field will land."""
-        slot = 0
-        for i, row in enumerate(self._rows):
-            if i == self._drag_idx:
-                continue
-            if slot == self._drag_target:
-                slot += 1
-            row.set_y(slot * self.ROW_H)
-            slot += 1
-
-    def _drag_end(self):
-        if self._drag_idx is None:
-            return
-        source, target = self._drag_idx, self._drag_target
-        self._drag_idx = None
-        if target != source:
-            self._selected.insert(target, self._selected.pop(source))
-        self._render()          # renumbers and snaps everything back
-
-    def _save(self, event=None):
-        screens = load_screens(self.prefs)
-        if self._is_new:
-            screens.append(list(self._selected))
-        elif self.index < len(screens):
-            screens[self.index] = list(self._selected)
-        save_screens(self.prefs, screens)
-        self.finish()
-
-    def _delete_screen(self, event=None):
-        screens = load_screens(self.prefs)
-        if len(screens) > 1 and self.index < len(screens):
-            screens.pop(self.index)
-            save_screens(self.prefs, screens)
-        self.finish()
+    def save_screens(self, prefs, screens):
+        save_screens(prefs, screens)

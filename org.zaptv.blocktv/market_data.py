@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ZapTV.org
+# Part of zaptv-lib (https://github.com/bitcoin3us/zaptv-lib): MIT-licensed
+# modules shared by the ZapTV family of MicroPythonOS apps.
+
 # market_data.py — fetches block height, prices and fee data from a
 # mempool.space-compatible API. Each endpoint is fetched independently so
 # one failing endpoint doesn't blank the others.

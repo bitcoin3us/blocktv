@@ -287,8 +287,11 @@ find . -type f | sort | TZ=CET zip -X -r0 ../org.zaptv.blocktv_0.2.0.mpk -@
   means the last one to resume gets the callbacks.
 - All network fetches degrade gracefully: fields show `--` until data
   arrives, and each API endpoint fails independently.
-- Licensed under the [MIT License](LICENSE). Bundled exception:
-  `bt_bold.ttf` is an ASCII subset of Roboto Bold (Apache License
-  2.0), rendered via LVGL tiny_ttf so values can scale to any size. If
-  the build lacks tiny_ttf the app falls back to the builtin Montserrat
-  sizes (max 28 px).
+- Licensed under the [GNU GPL, version 3 or later](LICENSE). The shared
+  modules it vendors (`nostr_service.py`, `zap_service.py`, `market_data.py`,
+  `odometer.py`, `field_picker.py`) come from
+  [zaptv-lib](https://github.com/bitcoin3us/zaptv-lib) and stay MIT so other
+  MPOS apps can reuse them; `bt_bold.ttf` is an ASCII subset of Roboto Bold
+  (Apache License 2.0), rendered via LVGL tiny_ttf so values can scale to
+  any size — if the build lacks tiny_ttf the app falls back to the builtin
+  Montserrat sizes (max 28 px). Full notices in [THIRD_PARTY.md](THIRD_PARTY.md).

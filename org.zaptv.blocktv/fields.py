@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ZapTV.org
+#
+# This file is part of BlockTV. BlockTV is free software: you can redistribute
+# it and/or modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version. It is distributed WITHOUT
+# ANY WARRANTY; see the GNU General Public License (LICENSE) for details.
+
 # fields.py — BlockTV field registry, derived metrics and formatting.
 #
 # Every displayable data field has an id, a title, and a render function

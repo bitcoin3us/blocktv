@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ZapTV.org
+# Part of zaptv-lib (https://github.com/bitcoin3us/zaptv-lib): MIT-licensed
+# modules shared by the ZapTV family of MicroPythonOS apps.
+
 # zap_service.py — ZapMonitor: glue between BlockTV and the shared
 # NostrManager singleton (nostr_service.py).
 #

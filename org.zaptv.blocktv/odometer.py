@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ZapTV.org
+# Part of zaptv-lib (https://github.com/bitcoin3us/zaptv-lib): MIT-licensed
+# modules shared by the ZapTV family of MicroPythonOS apps.
+
 # odometer.py — rolling-counter number display for BlockTV.
 #
 # Renders a value string as a row of per-character cells. Digit cells are
