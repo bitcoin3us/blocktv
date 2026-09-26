@@ -436,15 +436,18 @@ class FeeTile:
         if self.mode == "columns":
             col_w = avail_w // 3
             value_size = fit_size("888.8", col_w - 8, avail_h - small - 8)
+            # Value and caption as one block, centred in the column.
+            value_lh = int(value_size * 1.15)
+            y0 = max(0, (avail_h - (value_lh + 4 + small + 2)) // 2)
             for i, (_key, label, hint) in enumerate(FEE_TIERS):
                 x = i * col_w
                 value = lv.label(self.cont)
                 value.set_style_text_font(app._value_font(value_size), lv.PART.MAIN)
                 value.set_style_text_color(app.fg, lv.PART.MAIN)
-                value.set_style_text_opa(lv.OPA.COVER if label == "MEDIAN" else lv.OPA._70, lv.PART.MAIN)
+                value.set_style_text_opa(lv.OPA.COVER if label == "MEDIUM" else lv.OPA._70, lv.PART.MAIN)
                 value.set_width(col_w)
                 value.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
-                value.align(lv.ALIGN.TOP_LEFT, x, 0)
+                value.align(lv.ALIGN.TOP_LEFT, x, y0)
                 caption = lv.label(self.cont)
                 caption.set_text(label + "  " + hint)
                 caption.set_style_text_font(small_font, lv.PART.MAIN)
@@ -452,7 +455,7 @@ class FeeTile:
                 caption.set_style_text_opa(lv.OPA._50, lv.PART.MAIN)
                 caption.set_width(col_w)
                 caption.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
-                caption.align(lv.ALIGN.BOTTOM_LEFT, x, 0)
+                caption.align(lv.ALIGN.TOP_LEFT, x, y0 + value_lh + 4)
                 self.values.append(value); self.labels.append(caption)
         elif self.mode == "rows":
             row_h = avail_h // 3
@@ -468,7 +471,7 @@ class FeeTile:
                 value = lv.label(self.cont)
                 value.set_style_text_font(app._value_font(value_size), lv.PART.MAIN)
                 value.set_style_text_color(app.fg, lv.PART.MAIN)
-                value.set_style_text_opa(lv.OPA.COVER if label == "MEDIAN" else lv.OPA._70, lv.PART.MAIN)
+                value.set_style_text_opa(lv.OPA.COVER if label == "MEDIUM" else lv.OPA._70, lv.PART.MAIN)
                 value.align(lv.ALIGN.TOP_RIGHT, 0, y)
                 self.values.append(value); self.labels.append(caption)
         else:

@@ -129,11 +129,14 @@ _FEE_FIELDS = {
 PLACEHOLDER = "--"
 
 # The three fee tiers the combined Fees tile shows, in display order:
-# (state key, short label, what the estimate means).
+# (state key, short label, what the estimate means). All three are
+# mempool.space's recommended tiers from one estimate, so they always
+# order low <= medium <= high; the separate Median Fee field is the
+# projected next block's median, a different reading.
 FEE_TIERS = (
     ("fee_low", "LOW", "~1 hr"),
-    ("fee", "MEDIAN", "next block"),
-    ("fee_high", "HIGH", "fastest"),
+    ("fee_mid", "MEDIUM", "~30 min"),
+    ("fee_high", "HIGH", "next block"),
 )
 
 
