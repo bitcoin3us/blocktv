@@ -44,6 +44,7 @@ from market_data import (
     RANGE_SPECS, at_all_time_high, configure_point_cap, expected_points,
     extend_series, note_ath, record_fine, resample_fine, switch_currency,
 )
+from layouts import LAYOUTS, cell_rects, layout_for, layout_names
 from odometer import Odometer
 from zap_service import ZapMonitor
 from field_picker import (
@@ -344,26 +345,36 @@ def _add_floating_back(screen, on_click):
     return btn
 
 
+def _screen_entry(entry):
+    """Normalise one persisted screen to {"fields": [...], "layout": name}.
+    Screens saved before layouts existed are plain field lists."""
+    if isinstance(entry, dict):
+        fields, layout = entry.get("fields") or [], entry.get("layout") or ""
+    else:
+        fields, layout = entry, ""
+    valid = [f for f in fields if f in FIELD_IDS][:MAX_FIELDS_PER_SCREEN]
+    if not valid:
+        return None
+    return {"fields": valid, "layout": str(layout)}
+
+
 def load_screens(prefs):
+    """The user's screens as [{"fields": [...], "layout": name}, ...]."""
     raw = prefs.get_string("screens_json")
     if raw:
         try:
-            screens = json.loads(raw)
-            cleaned = []
-            for fields in screens:
-                valid = [f for f in fields if f in FIELD_IDS]
-                if valid:
-                    cleaned.append(valid[:MAX_FIELDS_PER_SCREEN])
+            cleaned = [e for e in (_screen_entry(x) for x in json.loads(raw)) if e]
             if cleaned:
                 return cleaned
         except Exception as e:
             print("BlockTV: bad screens_json, using defaults: {}".format(e))
-    return [list(s) for s in DEFAULT_SCREENS]
+    return [{"fields": list(s), "layout": ""} for s in DEFAULT_SCREENS]
 
 
 def save_screens(prefs, screens):
+    entries = [e for e in (_screen_entry(x) for x in screens) if e]
     editor = prefs.edit()
-    editor.put_string("screens_json", json.dumps(screens))
+    editor.put_string("screens_json", json.dumps(entries))
     editor.commit()
 
 
@@ -682,7 +693,9 @@ class BlockTV(Activity):
     # --- Configuration ---
 
     def _load_config(self):
-        self.screens = load_screens(self.prefs)
+        entries = load_screens(self.prefs)
+        self.screens = [e["fields"] for e in entries]
+        self.layouts = [e["layout"] for e in entries]
         self.bg, self.fg, self._stale_orange, self._stale_red = theme_colors(self.prefs)
         # Raw background hex drives the light/dark logo choice.
         self._bg_hex = _parse_color(self.prefs.get_string("bg_color", DEFAULT_BG), 0x000000)
@@ -1009,25 +1022,15 @@ class BlockTV(Activity):
         cont.remove_flag(lv.obj.FLAG.CLICKABLE)
 
         fields = self.screens[index]
-        n = len(fields)
-        cols = 1 if n <= 2 else 2
-        rows = (n + cols - 1) // cols
         pad = max(4, width // 60)
-        tile_w = (width - pad * (cols + 1)) // cols
-        tile_h = (height - self._dots_space - pad * (rows + 1)) // rows
+        layout = layout_for(self.layouts[index] if index < len(self.layouts) else "",
+                            len(fields))
+        rects = cell_rects(layout, width, height - self._dots_space, pad)
 
         tiles = {}
         previous, self._tile_labels = self._tile_labels, tiles
-        for i, field_id in enumerate(fields):
-            col = i % cols
-            row = i // cols
-            x = pad + col * (tile_w + pad)
-            y = pad + row * (tile_h + pad)
-            # Last tile of an odd count in a 2-col grid spans the full row.
-            w = tile_w
-            if cols == 2 and i == n - 1 and n % 2 == 1:
-                w = width - 2 * pad
-            self._make_tile(cont, field_id, x, y, w, tile_h, rows)
+        for field_id, (x, y, w, h, rows) in zip(fields, rects):
+            self._make_tile(cont, field_id, x, y, w, h, rows)
         self._page_tiles[index] = tiles
         self._tile_labels = previous
         return cont
@@ -2506,7 +2509,8 @@ class ScreensSettingsActivity(Activity):
         hint.set_width(lv.pct(100))
 
         screens = load_screens(self.prefs)
-        for index, field_list in enumerate(screens):
+        for index, entry in enumerate(screens):
+            field_list = entry["fields"]
             row = lv.obj(screen)
             row.set_width(lv.pct(100))
             row.set_height(lv.SIZE_CONTENT)
@@ -2524,6 +2528,8 @@ class ScreensSettingsActivity(Activity):
             title.set_pos(0, 0)
 
             names = ", ".join(FIELD_TITLES.get(f, f) for f in field_list)
+            if entry.get("layout"):
+                names = "[" + entry["layout"] + "]  " + names
             detail = lv.label(row)
             detail.set_text(names if names else "(empty)")
             detail.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
@@ -2570,3 +2576,112 @@ class ScreenEditActivity(FieldPickerActivity):
 
     def save_screens(self, prefs, screens):
         save_screens(prefs, screens)
+
+    def extra_buttons(self, row):
+        # Layouts are offered per field count, so the choice is made for
+        # the fields as currently selected; it is saved with them.
+        row_button(row, lv.SYMBOL.IMAGE + "  Layout", self._pick_layout, grow=1)
+
+    def _pick_layout(self):
+        intent = Intent(activity_class=LayoutPickerActivity)
+        intent.putExtra("count", len(self._selected))
+        intent.putExtra("current", self._extra.get("layout", ""))
+        intent.putExtra("fg", self._screen.get_style_text_color(lv.PART.MAIN))
+        self.startActivityForResult(intent, self._layout_chosen)
+
+    def _layout_chosen(self, result):
+        if result and result.get("result_code"):
+            self._extra["layout"] = (result.get("data") or {}).get("layout", "")
+
+
+class LayoutPickerActivity(Activity):
+    """Pick how a screen's fields are arranged, from the layouts that
+    exist for its field count. Each choice is drawn as a thumbnail with
+    the slots numbered the way the editor numbers the fields, so it is
+    clear which field lands where."""
+
+    def onCreate(self):
+        extras = self.getIntent().extras or {}
+        self.count = int(extras.get("count") or 1)
+        self.current = extras.get("current") or ""
+        screen = lv.obj()
+        screen.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
+        screen.set_flex_flow(lv.FLEX_FLOW.COLUMN)
+        screen.set_style_pad_row(8, lv.PART.MAIN)
+        screen.set_style_border_width(0, lv.PART.MAIN)
+        self.setContentView(screen)
+
+    def onResume(self, screen):
+        super().onResume(screen)
+        screen.clean()
+        ink = screen.get_style_text_color(lv.PART.MAIN)
+        accent = lv.theme_get_color_primary(None)
+        title = lv.label(screen)
+        title.set_text("Layout for {} field{}".format(self.count, "" if self.count == 1 else "s"))
+        title.set_style_text_font(FontManager.getFont(size=18), lv.PART.MAIN)
+        hint = lv.label(screen)
+        hint.set_text("Numbers are the field order in the editor; slot 1 gets the biggest cell.")
+        hint.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
+        hint.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+        hint.set_long_mode(lv.label.LONG_MODE.WRAP)
+        hint.set_width(lv.pct(100))
+
+        thumb_w = min(160, DisplayMetrics.width() // 3)
+        thumb_h = thumb_w * 2 // 3
+        options = LAYOUTS.get(self.count) or (layout_for("", self.count),)
+        default_name = options[0][0]
+        for layout in options:
+            name = layout[0]
+            chosen = (name == self.current) or (not self.current and name == default_name)
+            row = lv.obj(screen)
+            row.set_width(lv.pct(100))
+            row.set_height(lv.SIZE_CONTENT)
+            row.set_style_pad_all(6, lv.PART.MAIN)
+            row.set_style_border_width(2 if chosen else 1, lv.PART.MAIN)
+            if chosen:
+                row.set_style_border_color(accent, lv.PART.MAIN)
+            row.set_flex_flow(lv.FLEX_FLOW.ROW)
+            row.set_style_pad_column(10, lv.PART.MAIN)
+            row.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
+            row.add_flag(lv.obj.FLAG.CLICKABLE)
+            row.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
+            row.remove_flag(lv.obj.FLAG.SCROLLABLE)
+            row.add_event_cb(lambda e, n=name: self._choose(n), lv.EVENT.CLICKED, None)
+            add_focus_border(row)
+            self._thumbnail(row, layout, thumb_w, thumb_h, ink, accent if chosen else ink)
+            label = lv.label(row)
+            label.set_text(name + ("  (default)" if name == default_name else ""))
+            label.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
+        _add_floating_back(screen, self.finish)
+
+    def _thumbnail(self, parent, layout, w, h, ink, edge):
+        box = lv.obj(parent)
+        box.set_size(w, h)
+        box.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
+        box.set_style_border_width(0, lv.PART.MAIN)
+        box.set_style_pad_all(0, lv.PART.MAIN)
+        box.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
+        box.remove_flag(lv.obj.FLAG.SCROLLABLE)
+        box.remove_flag(lv.obj.FLAG.CLICKABLE)
+        for i, (x, y, cw, ch, _rows) in enumerate(cell_rects(layout, w, h, 3)):
+            cell = lv.obj(box)
+            cell.set_pos(x, y)
+            cell.set_size(cw, ch)
+            cell.set_style_radius(3, lv.PART.MAIN)
+            cell.set_style_border_width(1, lv.PART.MAIN)
+            cell.set_style_border_color(edge, lv.PART.MAIN)
+            cell.set_style_bg_color(ink, lv.PART.MAIN)
+            cell.set_style_bg_opa(lv.OPA._10, lv.PART.MAIN)
+            cell.set_style_pad_all(0, lv.PART.MAIN)
+            cell.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
+            cell.remove_flag(lv.obj.FLAG.SCROLLABLE)
+            cell.remove_flag(lv.obj.FLAG.CLICKABLE)
+            num = lv.label(cell)
+            num.set_text(str(i + 1))
+            num.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
+            num.set_style_text_color(ink, lv.PART.MAIN)
+            num.center()
+
+    def _choose(self, name):
+        self.setResult(True, {"layout": name})
+        self.finish()
