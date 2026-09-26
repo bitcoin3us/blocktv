@@ -41,8 +41,8 @@ from fields import (
 from market_data import (
     MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
     DERIVED_CURRENCIES, FINE_SLOT_SECONDS, FINE_SLOTS, RANGE_REFRESH,
-    RANGE_SPECS, at_all_time_high, extend_series, note_ath, record_fine,
-    resample_fine, switch_currency,
+    RANGE_SPECS, at_all_time_high, configure_point_cap, expected_points,
+    extend_series, note_ath, record_fine, resample_fine, switch_currency,
 )
 from odometer import Odometer
 from zap_service import ZapMonitor
@@ -403,6 +403,9 @@ class BlockTV(Activity):
             "ai": [], "ai_note": None,
         }
         self.market = None
+        # One chart point per pixel column: size the long-range caps to
+        # this display before anything is fetched or restored.
+        configure_point_cap(DisplayMetrics.width())
         self.zap_monitor = ZapMonitor()
         self._clock_timer = None
         self._market_task = None
@@ -600,6 +603,13 @@ class BlockTV(Activity):
             # re-download just because we rebooted.
             state["fetched_at"] = dict(cached.get("fetched_at")
                                        or cached.get("charts_ts") or {})
+            # A series recorded at a lower cap (an older build, or a cache
+            # carried over from a smaller display) is re-read at the next
+            # chance instead of at its weekly or monthly cadence, so the
+            # extra resolution this display can show arrives promptly.
+            for label, series in (state.get("charts") or {}).items():
+                if len(series) < 0.8 * expected_points(label):
+                    state["fetched_at"].pop(label, None)
         switch_currency(state, state.get("currency", "USD"))
 
     def _save_cache(self):
