@@ -164,6 +164,10 @@ roughly 0.7–1.9 s down to a few milliseconds. The swipe also acts as
 soon as your finger has travelled far enough, instead of waiting for you
 to lift it.
 
+Screens themselves can be reordered on the Screens page: drag a screen up or
+down, or tap its handle to move it one place down (wrapping to the top), and
+the dashboard follows the new order.
+
 ### Layouts
 
 Each screen can be arranged in any of the layouts that exist for its

@@ -48,7 +48,7 @@ from layouts import LAYOUTS, cell_rects, layout_for, layout_names
 from odometer import Odometer
 from zap_service import ZapMonitor
 from field_picker import (
-    FieldPickerActivity, button_row, row_button, no_scroll_chain,
+    DragReorder, FieldPickerActivity, button_row, row_button, no_scroll_chain,
 )
 from clankertv_core import (
     expected_pct as ai_expected_pct, format_amount as ai_format_amount,
@@ -2482,52 +2482,99 @@ class AboutActivity(Activity):
         right.set_style_text_align(lv.TEXT_ALIGN.RIGHT, lv.PART.MAIN)
 
 
-class ScreensSettingsActivity(Activity):
-    """List of the user's composed screens: tap to edit, plus Add."""
+class ScreensSettingsActivity(DragReorder, Activity):
+    """The user's composed screens, in dashboard order: tap one to edit
+    it, drag it (or tap its handle) to move it, Add for a new one.
+
+    Reordering is saved as it happens; the dashboard picks the new
+    order up when it resumes."""
+
+    ROW_H = 50
 
     def onCreate(self):
         extras = self.getIntent().extras or {}
         self.prefs = extras.get("prefs")
+        self._entries = []
+        self._rows = []
+        self._screen = None
         screen = lv.obj()
         screen.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
         screen.set_flex_flow(lv.FLEX_FLOW.COLUMN)
         screen.set_style_border_width(0, lv.PART.MAIN)
+        self._screen = screen
         self.setContentView(screen)
 
     def onResume(self, screen):
         super().onResume(screen)
+        self._screen = screen
+        self._entries = load_screens(self.prefs)
+        self._render()
+
+    def _reorder_target(self):
+        return self._entries
+
+    def _after_reorder(self):
+        save_screens(self.prefs, self._entries)
+        # The release that ended the drag still delivers a CLICKED to the
+        # row under the finger; rebuilding on a short timer instead of
+        # right here keeps that row alive to receive (and ignore) it.
+        timer = lv.timer_create(lambda t: self._render(), 40, None)
+        timer.set_repeat_count(1)
+
+    def _render(self):
+        screen = self._screen
+        screen.update_layout()
+        keep_scroll = screen.get_scroll_y()
         screen.clean()
+        self._drag_idx = None
+        self._rows = []
+        ink = screen.get_style_text_color(lv.PART.MAIN)
 
         header = lv.label(screen)
         header.set_text("Screens")
         header.set_style_text_font(FontManager.getFont(size=18), lv.PART.MAIN)
 
         hint = lv.label(screen)
-        hint.set_text("Swipe left/right on the dashboard to switch screens.")
+        hint.set_text("Tap a screen to edit it. Drag to reorder, or tap "
+                      + lv.SYMBOL.LIST + " to move it down.")
         hint.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
         hint.set_long_mode(lv.label.LONG_MODE.WRAP)
         hint.set_width(lv.pct(100))
 
-        screens = load_screens(self.prefs)
-        for index, entry in enumerate(screens):
-            field_list = entry["fields"]
-            row = lv.obj(screen)
-            row.set_width(lv.pct(100))
-            row.set_height(lv.SIZE_CONTENT)
+        # Rows live in a fixed-height container with scroll chaining off,
+        # so sliding one reorders instead of scrolling the page (the same
+        # arrangement as the editor's Selected list).
+        n = len(self._entries)
+        cont = lv.obj(screen)
+        cont.set_width(lv.pct(100))
+        cont.set_height(self.ROW_H * n)
+        cont.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
+        cont.set_style_border_width(0, lv.PART.MAIN)
+        cont.set_style_pad_all(0, lv.PART.MAIN)
+        cont.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
+        cont.remove_flag(lv.obj.FLAG.SCROLLABLE)
+        no_scroll_chain(cont)
+
+        for index, entry in enumerate(self._entries):
+            row = lv.obj(cont)
+            row.set_size(lv.pct(100), self.ROW_H - 4)
+            row.set_pos(0, index * self.ROW_H)
             row.set_style_border_width(1, lv.PART.MAIN)
+            row.set_style_radius(4, lv.PART.MAIN)
             row.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
-            row.add_flag(lv.obj.FLAG.CLICKABLE)
             row.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
             row.remove_flag(lv.obj.FLAG.SCROLLABLE)
-            row.add_event_cb(lambda e, i=index: self._edit_screen(i), lv.EVENT.CLICKED, None)
+            row.add_flag(lv.obj.FLAG.CLICKABLE)
+            no_scroll_chain(row)
+            row.add_event_cb(lambda e, i=index: self._row_clicked(i), lv.EVENT.CLICKED, None)
             add_focus_border(row)
 
             title = lv.label(row)
             title.set_text("Screen {}".format(index + 1))
             title.set_style_text_font(FontManager.getFont(size=16), lv.PART.MAIN)
-            title.set_pos(0, 0)
+            title.align(lv.ALIGN.TOP_LEFT, 0, 0)
 
-            names = ", ".join(FIELD_TITLES.get(f, f) for f in field_list)
+            names = ", ".join(FIELD_TITLES.get(f, f) for f in entry["fields"])
             if entry.get("layout"):
                 names = "[" + entry["layout"] + "]  " + names
             detail = lv.label(row)
@@ -2536,7 +2583,26 @@ class ScreensSettingsActivity(Activity):
             detail.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
             detail.set_long_mode(lv.label.LONG_MODE.DOTS)
             detail.set_width(lv.pct(100))
-            detail.set_pos(0, 20)
+            detail.align(lv.ALIGN.BOTTOM_LEFT, 0, 0)
+
+            # Its own button, so pressing it never starts a drag, and the
+            # only way to reorder from a keypad.
+            grip = lv.button(row)
+            grip.set_size(30, self.ROW_H - 10)
+            grip.align(lv.ALIGN.RIGHT_MID, 0, 0)
+            grip.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
+            grip.set_style_shadow_width(0, lv.PART.MAIN)
+            grip.add_event_cb(lambda e, i=index: self._nudge_index(i), lv.EVENT.CLICKED, None)
+            add_focus_border(grip)
+            grip_icon = lv.label(grip)
+            grip_icon.set_text(lv.SYMBOL.LIST)
+            grip_icon.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
+            grip_icon.set_style_text_color(ink, lv.PART.MAIN)
+            grip_icon.set_style_text_opa(lv.OPA._50, lv.PART.MAIN)
+            grip_icon.center()
+
+            self._bind_drag(row, index)
+            self._rows.append(row)
 
         # Going back is the floating return button, the same affordance
         # every other settings page here uses. Add takes the row, minus
@@ -2549,6 +2615,13 @@ class ScreensSettingsActivity(Activity):
         spacer.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
         spacer.set_style_border_width(0, lv.PART.MAIN)
         _add_floating_back(screen, self.finish)
+        screen.update_layout()
+        screen.scroll_to_y(keep_scroll, 0)
+
+    def _row_clicked(self, index):
+        if self.drag_consumed():
+            return                      # the release that ended a drag
+        self._edit_screen(index)
 
     def _edit_screen(self, index):
         intent = Intent(activity_class=ScreenEditActivity)
