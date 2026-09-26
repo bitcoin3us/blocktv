@@ -2543,7 +2543,16 @@ class ScreensSettingsActivity(DragReorder, Activity):
 
         # Rows live in a fixed-height container with scroll chaining off,
         # so sliding one reorders instead of scrolling the page (the same
-        # arrangement as the editor's Selected list).
+        # arrangement as the editor's Selected list). Their height comes
+        # from what they hold: the padding scales with the display, and
+        # the title and caption fonts do not, so a fixed number overlapped
+        # them on the wide board.
+        pad = DisplayMetrics.pct_of_width(2)
+        title_font = FontManager.getFont(size=16)
+        detail_font = FontManager.getFont(size=12)
+        title_h = title_font.get_line_height()
+        detail_h = detail_font.get_line_height()
+        self.ROW_H = 2 * pad + title_h + detail_h + 8
         n = len(self._entries)
         cont = lv.obj(screen)
         cont.set_width(lv.pct(100))
@@ -2561,7 +2570,7 @@ class ScreensSettingsActivity(DragReorder, Activity):
             row.set_pos(0, index * self.ROW_H)
             row.set_style_border_width(1, lv.PART.MAIN)
             row.set_style_radius(4, lv.PART.MAIN)
-            row.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
+            row.set_style_pad_all(pad, lv.PART.MAIN)
             row.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
             row.remove_flag(lv.obj.FLAG.SCROLLABLE)
             row.add_flag(lv.obj.FLAG.CLICKABLE)
@@ -2571,7 +2580,7 @@ class ScreensSettingsActivity(DragReorder, Activity):
 
             title = lv.label(row)
             title.set_text("Screen {}".format(index + 1))
-            title.set_style_text_font(FontManager.getFont(size=16), lv.PART.MAIN)
+            title.set_style_text_font(title_font, lv.PART.MAIN)
             title.align(lv.ALIGN.TOP_LEFT, 0, 0)
 
             names = ", ".join(FIELD_TITLES.get(f, f) for f in entry["fields"])
@@ -2579,11 +2588,13 @@ class ScreensSettingsActivity(DragReorder, Activity):
                 names = "[" + entry["layout"] + "]  " + names
             detail = lv.label(row)
             detail.set_text(names if names else "(empty)")
-            detail.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
+            detail.set_style_text_font(detail_font, lv.PART.MAIN)
             detail.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
             detail.set_long_mode(lv.label.LONG_MODE.DOTS)
-            detail.set_width(lv.pct(100))
-            detail.align(lv.ALIGN.BOTTOM_LEFT, 0, 0)
+            # Under the title, and stopping short of the handle.
+            detail.set_width(DisplayMetrics.width() - 4 * pad - 40)
+            detail.set_height(detail_h)     # one line: DOTS needs a bound to cut at
+            detail.align(lv.ALIGN.TOP_LEFT, 0, title_h + 4)
 
             # Its own button, so pressing it never starts a drag, and the
             # only way to reorder from a keypad.
