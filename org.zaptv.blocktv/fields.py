@@ -14,6 +14,8 @@
 # this separate from the UI lets screens be rebuilt from a plain list of
 # field ids (the user's custom layouts).
 
+import time
+
 from mpos import NumberFormat
 
 HALVING_INTERVAL = 210000
@@ -39,6 +41,7 @@ FIELD_IDS = [
     "clock",
     "zap",
     "nwc_balance",
+    "ai_usage",
 ]
 
 # Fields drawn as a graph rather than a number. The UI builds a chart
@@ -91,6 +94,7 @@ FIELD_TITLES = {
     "clock": "Clock",
     "zap": "Latest Zap",
     "nwc_balance": "Wallet",
+    "ai_usage": "AI Usage",
 }
 
 # Grouped for the field picker. Every id in FIELD_IDS must appear exactly
@@ -106,6 +110,7 @@ FIELD_CATEGORIES = (
     ("Chain", ("block_height", "supply")),
     ("Fees", ("fee_rate", "fee_high", "fee_low")),
     ("Wallet", ("zap", "nwc_balance")),
+    ("AI", ("ai_usage",)),
 )
 
 _grouped = [f for _name, ids in FIELD_CATEGORIES for f in ids]
@@ -142,6 +147,7 @@ FIELD_SOURCES = {
     "clock": (),
     "zap": ("nostr",),
     "nwc_balance": ("nwc",),
+    "ai_usage": ("ai",),
 }
 
 
@@ -197,6 +203,68 @@ def duration_str(blocks):
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def ai_headline(records, now=None):
+    """(value, sub) for the AI Usage tile from ClankerTV-style records.
+
+    Shows the meter closest to its limit across every provider polled:
+    on a dashboard that is the one number worth a glance. Percentage
+    meters print as "42%"; spend meters without a limit print the amount.
+    A record kept alive from an earlier poll (`stale`) still shows, with
+    the provider's error in the caption; a provider with no readings at
+    all shows the error alone."""
+    if now is None:
+        now = time.time()
+    best = None                     # (pct, record, meter)
+    fallback = None                 # first error record, if nothing has meters
+    for rec in records or []:
+        meters = rec.get("meters") or []
+        if not meters:
+            if fallback is None and rec.get("error"):
+                fallback = rec
+            continue
+        meter = meters[0]
+        pct = meter.get("pct")
+        key = -1 if pct is None else pct
+        if best is None or key > best[0]:
+            best = (key, rec, meter)
+    if best is None:
+        if fallback is not None:
+            return PLACEHOLDER, "%s: %s" % (fallback.get("name", "AI"), fallback.get("error"))[:60]
+        return PLACEHOLDER, "no readings yet"
+    _key, rec, meter = best
+    pct = meter.get("pct")
+    if pct is not None:
+        value = "%d%%" % round(pct)
+    else:
+        used = meter.get("used")
+        unit = meter.get("unit") or ""
+        value = (unit + ("%.2f" % used if used < 100 else "%.0f" % used)) if used is not None else PLACEHOLDER
+    name = rec.get("name") or rec.get("id") or "AI"
+    label = meter.get("label") or ""
+    if rec.get("stale") and rec.get("error"):
+        sub = "%s %s · %s" % (name, label, rec.get("error"))
+    else:
+        elapsed = max(0, now - (rec.get("age_base") or now))
+        left = meter.get("reset_in")
+        tail = ""
+        if left is not None:
+            left = max(0, int(left - elapsed))
+            tail = "resetting" if left <= 0 else "resets in " + _duration(left)
+        sub = "%s %s" % (name, label) + (" · " + tail if tail else "")
+    return value, sub[:60]
+
+
+def _duration(seconds):
+    minutes = int(seconds) // 60
+    if minutes < 1:
+        return "<1m"
+    if minutes < 60:
+        return "%dm" % minutes
+    if minutes < 1440:
+        return "%dh %dm" % (minutes // 60, minutes % 60)
+    return "%dd %dh" % (minutes // 1440, (minutes % 1440) // 60)
 
 
 def render_field(field_id, state):
@@ -301,5 +369,11 @@ def render_field(field_id, state):
         if balance is None:
             return PLACEHOLDER, "sats"
         return fmt_int(balance), "sats"
+
+    if field_id == "ai_usage":
+        note = state.get("ai_note")
+        if note:
+            return PLACEHOLDER, note
+        return ai_headline(state.get("ai"))
 
     return "?", field_id

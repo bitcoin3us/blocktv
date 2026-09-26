@@ -1,6 +1,8 @@
-zaptv-lib 48f5b32602b646891d0df8f0b12877d6ed86802b
+zaptv-lib 1853a529c6b8218b525c895da02d42857e340124
 nostr_service.py
 zap_service.py
 market_data.py
 odometer.py
 field_picker.py
+clankertv_core.py
+clankertv_providers.py

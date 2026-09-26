@@ -22,6 +22,7 @@ BlockTV — a clean, customisable Bitcoin dashboard app for
 | Clock | Normal time + date (uses the OS timezone) | on-device |
 | Latest Zap | Most recent nostr zap to your npub | nostr relays (kind 9735) |
 | Wallet | Wallet balance in sats | Nostr Wallet Connect |
+| AI Usage | The AI provider meter closest to its limit (Claude session/weekly, OpenRouter, DeepSeek, xAI) with its reset countdown; sources are configured in ClankerTV | provider APIs or the ClankerTV bridge, via ClankerTV's settings |
 | 24h Chart | Price line graph over the last 24 hours | mempool.space API |
 | 7d Chart | Price line graph over the last 7 days | mempool.space API |
 | 30d Chart | Price line graph over the last 30 days | mempool.space API |
@@ -289,7 +290,7 @@ find . -type f | sort | TZ=CET zip -X -r0 ../org.zaptv.blocktv_0.2.0.mpk -@
   arrives, and each API endpoint fails independently.
 - Licensed under the [GNU GPL, version 3 or later](LICENSE). The shared
   modules it vendors (`nostr_service.py`, `zap_service.py`, `market_data.py`,
-  `odometer.py`, `field_picker.py`) come from
+  `odometer.py`, `field_picker.py`, `clankertv_core.py`, `clankertv_providers.py`) come from
   [zaptv-lib](https://github.com/bitcoin3us/zaptv-lib) and stay MIT so other
   MPOS apps can reuse them; `bt_bold.ttf` is an ASCII subset of Roboto Bold
   (Apache License 2.0), rendered via LVGL tiny_ttf so values can scale to

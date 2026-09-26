@@ -49,6 +49,11 @@ from zap_service import ZapMonitor
 from field_picker import (
     FieldPickerActivity, button_row, row_button, no_scroll_chain,
 )
+from clankertv_core import merge_records as ai_merge_records
+from clankertv_providers import (
+    SOURCE_TYPES as AI_SOURCE_TYPES, build_sources as ai_build_sources,
+    fetch_all as ai_fetch_all,
+)
 
 # Defaults chosen by probing each relay for kind-9735 zap receipts, not
 # just for a successful handshake: relay.damus.io accepted the connection
@@ -98,6 +103,12 @@ _HW_ACRONYMS = ("lcd", "oled", "tft", "gps", "imu", "ir", "sd", "usb", "tv")
 PCT_EMPHASIS = {"24h": 2.0, "7d": 5.0, "30d": 10.0, "1y": 40.0,
                 "4y": 100.0}
 PRIORITY_FEE_FIELDS = ("fee_low", "fee_high")
+# The AI Usage field reads its sources (Claude token, bridge, API keys)
+# and poll interval from ClankerTV's own preferences: configure once,
+# in the app built for it, and this field just shows the headline.
+AI_PREFS_APP = "org.zaptv.clankertv"
+AI_POLL_DEFAULT = 120
+AI_POLL_MIN = 60
 PILL_BUMP = 4               # pill font size, over the tile's small font
 PILL_BUMP_BIG = 8           # ...and when the move clears its threshold
 FLASH_MS = 150              # attention flash duration
@@ -389,11 +400,13 @@ class BlockTV(Activity):
             "fee_low": None, "fee_high": None,
             "currency": "USD", "zap": None, "balance": None,
             "localtime": None,
+            "ai": [], "ai_note": None,
         }
         self.market = None
         self.zap_monitor = ZapMonitor()
         self._clock_timer = None
         self._market_task = None
+        self._ai_task = None
         self._tile_labels = {}
         self._page_conts = {}
         self._page_tiles = {}
@@ -458,6 +471,7 @@ class BlockTV(Activity):
         # resume stops at its next tick instead of doubling up.
         self._loop_gen += 1
         self._market_task = TaskManager.create_task(self._market_loop(self._loop_gen))
+        self._ai_task = TaskManager.create_task(self._ai_loop(self._loop_gen))
         self._start_button_watcher()
         self._clock_timer = lv.timer_create(self._clock_tick, 1000, None)
         self._clock_timer.set_repeat_count(-1)
@@ -481,6 +495,8 @@ class BlockTV(Activity):
             active.append("nostr")
         if self.nwc_url:
             active.append("nwc")
+        if self._uses_ai_usage():
+            active.append("ai")
         for source in active:
             if source not in stamps:
                 stamps[source] = now
@@ -620,6 +636,8 @@ class BlockTV(Activity):
             return NWC_CADENCE_SECONDS
         if source == "nostr":
             return NOSTR_CADENCE_SECONDS
+        if source == "ai":
+            return self._ai_interval()
         return self.refresh_seconds
 
     def _chart_freshness(self, field_id):
@@ -1753,6 +1771,61 @@ class BlockTV(Activity):
                     return True
         return False
 
+    # --- AI usage (ClankerTV's meters as a field) ---
+
+    def _uses_ai_usage(self):
+        for fields in self.screens:
+            if "ai_usage" in fields:
+                return True
+        return False
+
+    def _ai_prefs(self):
+        """ClankerTV's preferences, re-read on each use so a source added
+        there shows up here without restarting anything."""
+        return SharedPreferences(AI_PREFS_APP)
+
+    def _ai_interval(self):
+        try:
+            value = int(self._ai_prefs().get_string("poll_interval", str(AI_POLL_DEFAULT)))
+        except (TypeError, ValueError):
+            value = AI_POLL_DEFAULT
+        return max(AI_POLL_MIN, value)
+
+    async def _ai_loop(self, gen):
+        """Poll the usage sources only while an AI Usage field is on a
+        screen: a Claude poll costs a token, so nothing is spent for a
+        field nobody has added. Records merge the way ClankerTV's do, so a
+        failed poll keeps the last reading, flagged stale."""
+        while self.keep_running and gen == self._loop_gen:
+            if not self._uses_ai_usage():
+                await TaskManager.sleep(5)
+                continue
+            try:
+                sources = ai_build_sources(self._ai_prefs())
+            except Exception as e:
+                print("BlockTV: AI usage sources unreadable: {}".format(e))
+                sources = []
+            if not sources:
+                self.state["ai_note"] = "Set up sources in ClankerTV"
+            else:
+                self.state["ai_note"] = None
+                try:
+                    results = await ai_fetch_all(sources)
+                    now = time.time()
+                    self.state["ai"] = ai_merge_records(self.state.get("ai") or [],
+                                                        results, now)
+                    if any(r.get("ok") and not r.get("stale") for r in self.state["ai"]):
+                        self.state.setdefault("updated_at", {})["ai"] = now
+                except Exception as e:
+                    print("BlockTV: AI usage poll error: {}".format(e))
+            if (self.keep_running and gen == self._loop_gen and self.has_foreground()
+                    and "ai_usage" in self._tile_labels):
+                self._update_tile("ai_usage")
+            slept, interval = 0, self._ai_interval()
+            while self.keep_running and gen == self._loop_gen and slept < interval:
+                await TaskManager.sleep(1)
+                slept += 1
+
     def _on_key(self, event):
         """Arrow keys turn pages on a device with no touchscreen.
 
@@ -1806,6 +1879,9 @@ class MainSettingsActivity(SettingsActivity):
             {"title": "Nostr", "ui": "activity",
              "activity_class": NostrSettingsActivity,
              "placeholder": "Zaps, relays, wallet connect", "key": "_nostr"},
+            {"title": "AI Usage", "ui": "activity",
+             "activity_class": AiUsageSettingsActivity,
+             "placeholder": "Sources come from ClankerTV", "key": "_ai"},
             {"title": "Currency", "key": "currency", "ui": "activity",
              "activity_class": CurrencySettingsActivity,
              "placeholder": self.prefs.get_string("currency", "USD")
@@ -2057,6 +2133,58 @@ class CurrencySettingsActivity(Activity):
         # The settings list re-renders on resume and shows this row text.
         self.setting["placeholder"] = code
         self.finish()
+
+
+class AiUsageSettingsActivity(Activity):
+    """Where the AI Usage field gets its numbers, and how to change that.
+
+    There is nothing to edit here on purpose: the tokens live in
+    ClankerTV, the app built for them, and this page only reports what it
+    found there."""
+
+    def onCreate(self):
+        screen = lv.obj()
+        screen.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
+        screen.set_flex_flow(lv.FLEX_FLOW.COLUMN)
+        screen.set_style_pad_row(8, lv.PART.MAIN)
+        screen.set_style_border_width(0, lv.PART.MAIN)
+        self.setContentView(screen)
+
+    def onResume(self, screen):
+        super().onResume(screen)
+        screen.clean()
+        title = lv.label(screen)
+        title.set_text("AI Usage")
+        title.set_style_text_font(FontManager.getFont(size=18), lv.PART.MAIN)
+
+        names = []
+        interval = AI_POLL_DEFAULT
+        try:
+            prefs = SharedPreferences(AI_PREFS_APP)
+            for keys, factory in AI_SOURCE_TYPES:
+                if (prefs.get_string(keys[0], "") or "").strip():
+                    names.append(factory.name)
+            interval = int(prefs.get_string("poll_interval", str(AI_POLL_DEFAULT)))
+        except Exception:
+            pass
+        if names:
+            body = ("Configured in ClankerTV: " + ", ".join(names)
+                    + ".\nPolled every {} s while an AI Usage field is on a screen."
+                      .format(max(AI_POLL_MIN, interval)))
+        else:
+            body = ("No sources configured.\nInstall ClankerTV and add a source "
+                    "under its Settings > Connect; this field will pick it up.")
+        for text, size, opa in ((body, 14, lv.OPA.COVER),
+                                ("The field shows the meter closest to its limit "
+                                 "across all providers, with its reset countdown. "
+                                 "Add it from Screens > AI.", 12, lv.OPA._60)):
+            label = lv.label(screen)
+            label.set_text(text)
+            label.set_style_text_font(FontManager.getFont(size=size), lv.PART.MAIN)
+            label.set_style_text_opa(opa, lv.PART.MAIN)
+            label.set_long_mode(lv.label.LONG_MODE.WRAP)
+            label.set_width(lv.pct(96))
+        _add_floating_back(screen, self.finish)
 
 
 class AboutActivity(Activity):

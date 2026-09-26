@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB="${ZAPTV_LIB:-$ROOT/../dev-zaptv-lib}"
 APP="$ROOT/org.zaptv.blocktv"
-MODULES=(nostr_service.py zap_service.py market_data.py odometer.py field_picker.py)
+MODULES=(nostr_service.py zap_service.py market_data.py odometer.py field_picker.py clankertv_core.py clankertv_providers.py)
 
 [[ -d "$LIB/.git" ]] || { echo "zaptv-lib checkout not found at $LIB" >&2; exit 1; }
 if [[ -n "$(git -C "$LIB" status --porcelain -- "${MODULES[@]}")" ]]; then
