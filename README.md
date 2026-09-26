@@ -22,6 +22,7 @@ BlockTV — a clean, customisable Bitcoin dashboard app for
 | Clock | Normal time + date (uses the OS timezone) | on-device |
 | Latest Zap | Most recent nostr zap to your npub | nostr relays (kind 9735) |
 | Wallet | Wallet balance in sats | Nostr Wallet Connect |
+| Fees | Low, median and high priority fee rates in one tile, arranged for the space: three columns, three rows, or one line | mempool.space |
 | AI Usage | The AI provider meter closest to its limit (Claude session/weekly, OpenRouter, DeepSeek, xAI) with its reset countdown; sources are configured in ClankerTV | provider APIs or the ClankerTV bridge, via ClankerTV's settings |
 | 24h Chart | Price line graph over the last 24 hours | mempool.space API |
 | 7d Chart | Price line graph over the last 7 days | mempool.space API |

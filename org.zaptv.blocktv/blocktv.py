@@ -35,8 +35,9 @@ from mpos import (
 import mpos.time
 
 from fields import (
-    CHART_FIELDS, CHART_LABELS, FIELD_CATEGORIES, FIELD_IDS, FIELD_SOURCES,
-    FIELD_TITLES, MONTHS, WEEKDAYS, ai_pick, chart_series, render_field,
+    CHART_FIELDS, CHART_LABELS, FEE_TIERS, FIELD_CATEGORIES, FIELD_IDS,
+    FIELD_SOURCES, FIELD_TITLES, MONTHS, WEEKDAYS, ai_pick, chart_series,
+    fee_layout, fmt_fee, render_field,
 )
 from market_data import (
     MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
@@ -108,7 +109,7 @@ _HW_ACRONYMS = ("lcd", "oled", "tft", "gps", "imu", "ir", "sd", "usb", "tv")
 # trend pill's text steps up a size.
 PCT_EMPHASIS = {"24h": 2.0, "7d": 5.0, "30d": 10.0, "1y": 40.0,
                 "4y": 100.0}
-PRIORITY_FEE_FIELDS = ("fee_low", "fee_high")
+PRIORITY_FEE_FIELDS = ("fee_low", "fee_high", "fee_all")
 # The AI Usage field reads its sources (Claude token, bridge, API keys)
 # and poll interval from ClankerTV's own preferences: configure once,
 # in the app built for it, and this field just shows the headline.
@@ -412,6 +413,79 @@ def _plain(obj):
     obj.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
     obj.remove_flag(lv.obj.FLAG.SCROLLABLE)
     obj.remove_flag(lv.obj.FLAG.CLICKABLE)
+
+
+class FeeTile:
+    """All three fee tiers in one tile, arranged for the room it has.
+
+    Wide: three columns, the median (what a normal transaction pays to
+    get in soon) at full strength and the others a shade dimmer. Tall and
+    narrow: three label/value rows. Too small for either: one line of the
+    three numbers. The unit sits once in the tile's caption."""
+
+    def __init__(self, tile, app, w, h, top, small):
+        self.app = app
+        avail_w, avail_h = w - 8, h - top - (small + 10)
+        self.mode = fee_layout(avail_w, avail_h)
+        self.cont = lv.obj(tile)
+        _plain(self.cont)
+        self.cont.set_size(avail_w, max(1, avail_h))
+        self.cont.align(lv.ALIGN.TOP_LEFT, 0, top)
+        small_font = FontManager.getFont(size=small)
+        self.values, self.labels = [], []
+        if self.mode == "columns":
+            col_w = avail_w // 3
+            value_size = fit_size("888.8", col_w - 8, avail_h - small - 8)
+            for i, (_key, label, hint) in enumerate(FEE_TIERS):
+                x = i * col_w
+                value = lv.label(self.cont)
+                value.set_style_text_font(app._value_font(value_size), lv.PART.MAIN)
+                value.set_style_text_color(app.fg, lv.PART.MAIN)
+                value.set_style_text_opa(lv.OPA.COVER if label == "MEDIAN" else lv.OPA._70, lv.PART.MAIN)
+                value.set_width(col_w)
+                value.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
+                value.align(lv.ALIGN.TOP_LEFT, x, 0)
+                caption = lv.label(self.cont)
+                caption.set_text(label + "  " + hint)
+                caption.set_style_text_font(small_font, lv.PART.MAIN)
+                caption.set_style_text_color(app.fg, lv.PART.MAIN)
+                caption.set_style_text_opa(lv.OPA._50, lv.PART.MAIN)
+                caption.set_width(col_w)
+                caption.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
+                caption.align(lv.ALIGN.BOTTOM_LEFT, x, 0)
+                self.values.append(value); self.labels.append(caption)
+        elif self.mode == "rows":
+            row_h = avail_h // 3
+            value_size = fit_size("888.8", avail_w // 2, row_h - 4)
+            for i, (_key, label, hint) in enumerate(FEE_TIERS):
+                y = i * row_h
+                caption = lv.label(self.cont)
+                caption.set_text(label)
+                caption.set_style_text_font(small_font, lv.PART.MAIN)
+                caption.set_style_text_color(app.fg, lv.PART.MAIN)
+                caption.set_style_text_opa(lv.OPA._50, lv.PART.MAIN)
+                caption.align(lv.ALIGN.TOP_LEFT, 0, y + max(0, (row_h - small) // 2))
+                value = lv.label(self.cont)
+                value.set_style_text_font(app._value_font(value_size), lv.PART.MAIN)
+                value.set_style_text_color(app.fg, lv.PART.MAIN)
+                value.set_style_text_opa(lv.OPA.COVER if label == "MEDIAN" else lv.OPA._70, lv.PART.MAIN)
+                value.align(lv.ALIGN.TOP_RIGHT, 0, y)
+                self.values.append(value); self.labels.append(caption)
+        else:
+            value = lv.label(self.cont)
+            value.set_style_text_font(app._value_font(fit_size("88 / 88 / 88", avail_w, avail_h)), lv.PART.MAIN)
+            value.set_style_text_color(app.fg, lv.PART.MAIN)
+            value.set_width(avail_w)
+            value.set_style_text_align(lv.TEXT_ALIGN.RIGHT, lv.PART.MAIN)
+            value.align(lv.ALIGN.CENTER, 0, 0)
+            self.values.append(value)
+
+    def update(self, state):
+        if self.mode == "line":
+            self.values[0].set_text(render_field("fee_all", state)[0])
+            return
+        for value, (key, _label, _hint) in zip(self.values, FEE_TIERS):
+            value.set_text(fmt_fee(state.get(key)))
 
 
 class AiMeterTile:
@@ -1083,6 +1157,8 @@ class BlockTV(Activity):
                 price.move_foreground()
         elif field_id == "ai_usage" and h - head - 6 >= 40:
             value = AiMeterTile(tile, self, w, h, head, small)
+        elif field_id == "fee_all":
+            value = FeeTile(tile, self, w, h, head, small)
         else:
             value = Odometer(tile)
             # Slightly above center so the sub label fits directly below.
@@ -1473,6 +1549,13 @@ class BlockTV(Activity):
             return
         if isinstance(self._tile_labels[field_id][1], AiMeterTile):
             self._tile_labels[field_id][1].update(self.state)
+            self._apply_title_color(field_id)
+            return
+        if isinstance(self._tile_labels[field_id][1], FeeTile):
+            _t, tile, sub = self._tile_labels[field_id][:3]
+            tile.update(self.state)
+            sub.set_text("sat/vB" if tile.mode != "line" else "low / med / high sat/vB")
+            sub.align(lv.ALIGN.BOTTOM_RIGHT, 0, 0)
             self._apply_title_color(field_id)
             return
         (title, value, sub, max_w, max_h,

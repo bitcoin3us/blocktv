@@ -36,6 +36,7 @@ FIELD_IDS = [
     "fee_rate",
     "fee_low",
     "fee_high",
+    "fee_all",
     "supply",
     "market_cap",
     "clock",
@@ -89,6 +90,7 @@ FIELD_TITLES = {
     "fee_rate": "Median Fee",
     "fee_low": "Low Priority Fee",
     "fee_high": "High Priority Fee",
+    "fee_all": "Fees",
     "supply": "Supply",
     "market_cap": "Market Cap",
     "clock": "Clock",
@@ -108,7 +110,7 @@ FIELD_CATEGORIES = (
     # someone scanning this list will look for it.
     ("Time", ("clock", "moscow_time", "halving")),
     ("Chain", ("block_height", "supply")),
-    ("Fees", ("fee_rate", "fee_high", "fee_low")),
+    ("Fees", ("fee_all", "fee_rate", "fee_high", "fee_low")),
     ("Wallet", ("zap", "nwc_balance")),
     ("AI", ("ai_usage",)),
 )
@@ -126,6 +128,35 @@ _FEE_FIELDS = {
 
 PLACEHOLDER = "--"
 
+# The three fee tiers the combined Fees tile shows, in display order:
+# (state key, short label, what the estimate means).
+FEE_TIERS = (
+    ("fee_low", "LOW", "~1 hr"),
+    ("fee", "MEDIAN", "next block"),
+    ("fee_high", "HIGH", "fastest"),
+)
+
+
+def fmt_fee(fee):
+    """One decimal below 10 sat/vB, where it matters; whole numbers above."""
+    if fee is None:
+        return PLACEHOLDER
+    if fee < 10:
+        return "%.1f" % fee
+    return fmt_int(round(fee))
+
+
+def fee_layout(avail_w, avail_h):
+    """How the Fees tile should arrange its three tiers in the room it
+    has: "columns" side by side when wide enough for three readable
+    numbers, "rows" when tall but narrow, and "line" when it is too small
+    for either and one line of three numbers is all that fits."""
+    if avail_w >= 180 and avail_h >= 44:
+        return "columns"
+    if avail_h >= 66:
+        return "rows"
+    return "line"
+
 # Which data source(s) feed each field — used for stale-data warnings.
 # clock is local-only and never goes stale.
 FIELD_SOURCES = {
@@ -142,6 +173,7 @@ FIELD_SOURCES = {
     "fee_rate": ("fees",),
     "fee_low": ("fees",),
     "fee_high": ("fees",),
+    "fee_all": ("fees",),
     "supply": ("height",),
     "market_cap": ("height", "price"),
     "clock": (),
@@ -327,6 +359,12 @@ def render_field(field_id, state):
         next_halving = ((height // HALVING_INTERVAL) + 1) * HALVING_INTERVAL
         remaining = next_halving - height
         return fmt_int(remaining), "blocks · " + duration_str(remaining)
+
+    if field_id == "fee_all":
+        parts = [fmt_fee(state.get(key)) for key, _label, _hint in FEE_TIERS]
+        if all(p == PLACEHOLDER for p in parts):
+            return PLACEHOLDER, "low / med / high sat/vB"
+        return " / ".join(parts), "low / med / high sat/vB"
 
     if field_id in _FEE_FIELDS:
         # mempool.space's own wording: high priority is its next-block
