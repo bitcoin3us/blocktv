@@ -36,7 +36,7 @@ import mpos.time
 
 from fields import (
     CHART_FIELDS, CHART_LABELS, FIELD_CATEGORIES, FIELD_IDS, FIELD_SOURCES,
-    FIELD_TITLES, MONTHS, WEEKDAYS, chart_series, render_field,
+    FIELD_TITLES, MONTHS, WEEKDAYS, ai_pick, chart_series, render_field,
 )
 from market_data import (
     MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
@@ -49,7 +49,12 @@ from zap_service import ZapMonitor
 from field_picker import (
     FieldPickerActivity, button_row, row_button, no_scroll_chain,
 )
-from clankertv_core import merge_records as ai_merge_records
+from clankertv_core import (
+    expected_pct as ai_expected_pct, format_amount as ai_format_amount,
+    format_pct as ai_format_pct, format_reset as ai_format_reset,
+    level as ai_level, merge_records as ai_merge_records,
+    pace_text as ai_pace_text,
+)
 from clankertv_providers import (
     SOURCE_TYPES as AI_SOURCE_TYPES, build_sources as ai_build_sources,
     fetch_all as ai_fetch_all,
@@ -109,6 +114,9 @@ PRIORITY_FEE_FIELDS = ("fee_low", "fee_high")
 AI_PREFS_APP = "org.zaptv.clankertv"
 AI_POLL_DEFAULT = 120
 AI_POLL_MIN = 60
+# ClankerTV's meter colours (green / amber / red at its 50% and 80%
+# thresholds), so the same reading looks the same in both apps.
+AI_LEVEL_COLORS = (0x7FA25A, 0xE0A040, 0xD9534F)
 PILL_BUMP = 4               # pill font size, over the tile's small font
 PILL_BUMP_BIG = 8           # ...and when the move clears its threshold
 FLASH_MS = 150              # attention flash duration
@@ -383,6 +391,162 @@ def migrate_theme_pref(prefs):
         editor.put_string("bg_color", bg)
     editor.put_string("theme", None)
     editor.commit()
+
+
+def _plain(obj):
+    """Transparent, borderless, unpadded, unscrollable container."""
+    obj.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
+    obj.set_style_border_width(0, lv.PART.MAIN)
+    obj.set_style_pad_all(0, lv.PART.MAIN)
+    obj.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
+    obj.remove_flag(lv.obj.FLAG.SCROLLABLE)
+    obj.remove_flag(lv.obj.FLAG.CLICKABLE)
+
+
+class AiMeterTile:
+    """ClankerTV's meter card, fitted into a dashboard tile.
+
+    Per meter (a Claude session and week, say): the meter's name, its
+    percentage in the level colour, a bar with the white pace tick where
+    usage would be if spread evenly over the window, and underneath the
+    reset countdown on the left and the pace verdict on the right --
+    the same four things ClankerTV shows, at whatever size the tile
+    allows. Two meters when the tile has room for them, one when it
+    doesn't; tiles too small for even one keep the one-line rendering.
+
+    Built once per page. update() re-reads the records; tick() runs
+    every second from the clock timer to move the countdowns and the
+    pace ticks, exactly as ClankerTV's own timer does."""
+
+    def __init__(self, tile, app, w, h, top, small):
+        self.app = app
+        self.live = []                  # (record, meter) shown per slot
+        self.rows = []
+        avail = h - top - 6
+        self.slots = 2 if avail >= 80 else (1 if avail >= 40 else 0)
+        self.cont = lv.obj(tile)
+        _plain(self.cont)
+        self.cont.set_size(w - 8, max(1, avail))
+        self.cont.align(lv.ALIGN.TOP_LEFT, 0, top)
+        small_font = FontManager.getFont(size=small)
+        # One line for notes and errors when there is nothing to meter.
+        self.note = lv.label(self.cont)
+        self.note.set_text("")
+        self.note.set_style_text_font(small_font, lv.PART.MAIN)
+        self.note.set_style_text_color(app.fg, lv.PART.MAIN)
+        self.note.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+        self.note.set_long_mode(lv.label.LONG_MODE.WRAP)
+        self.note.set_width(w - 8)
+        self.note.align(lv.ALIGN.TOP_LEFT, 0, 0)
+        self.note.add_flag(lv.obj.FLAG.HIDDEN)
+        if not self.slots:
+            return
+        slot_h = avail // self.slots
+        big = max(14, min(40, int(slot_h * 0.42)))
+        big_font = app._value_font(big)
+        bar_h = max(5, min(12, slot_h // 8))
+        line = int(big * 1.15)
+        for i in range(self.slots):
+            y0 = i * slot_h
+            name = lv.label(self.cont)
+            name.set_style_text_font(small_font, lv.PART.MAIN)
+            name.set_style_text_color(app.fg, lv.PART.MAIN)
+            name.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+            name.set_style_text_letter_space(1, lv.PART.MAIN)
+            name.align(lv.ALIGN.TOP_LEFT, 0, y0 + max(0, (line - small) // 2))
+            pct = lv.label(self.cont)
+            pct.set_style_text_font(big_font, lv.PART.MAIN)
+            pct.align(lv.ALIGN.TOP_RIGHT, 0, y0)
+            bar = lv.bar(self.cont)
+            bar.set_size(w - 8, bar_h)
+            bar.set_pos(0, y0 + line + 3)
+            bar.set_range(0, 1000)
+            bar.set_style_bg_color(app.fg, lv.PART.MAIN)
+            bar.set_style_bg_opa(lv.OPA._20, lv.PART.MAIN)
+            bar.set_style_radius(bar_h // 2, lv.PART.MAIN)
+            bar.set_style_radius(bar_h // 2, lv.PART.INDICATOR)
+            bar.remove_flag(lv.obj.FLAG.CLICKABLE)
+            marker = lv.obj(bar)
+            marker.set_size(2, bar_h + 4)
+            marker.set_style_bg_color(app.fg, lv.PART.MAIN)
+            marker.set_style_bg_opa(lv.OPA._70, lv.PART.MAIN)
+            marker.set_style_border_width(0, lv.PART.MAIN)
+            marker.set_style_radius(0, lv.PART.MAIN)
+            marker.add_flag(lv.obj.FLAG.IGNORE_LAYOUT)
+            marker.remove_flag(lv.obj.FLAG.CLICKABLE)
+            marker.add_flag(lv.obj.FLAG.HIDDEN)
+            below = y0 + line + 3 + bar_h + 3
+            left = lv.label(self.cont)
+            right = lv.label(self.cont)
+            for lab in (left, right):
+                lab.set_style_text_font(small_font, lv.PART.MAIN)
+                lab.set_style_text_color(app.fg, lv.PART.MAIN)
+                lab.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+                lab.set_text("")
+            left.align(lv.ALIGN.TOP_LEFT, 0, below)
+            right.align(lv.ALIGN.TOP_RIGHT, 0, below)
+            self.rows.append((name, pct, bar, marker, left, right))
+            self._show_row(i, False)
+
+    def _show_row(self, i, shown):
+        for obj in self.rows[i]:
+            if shown:
+                obj.remove_flag(lv.obj.FLAG.HIDDEN)
+            else:
+                obj.add_flag(lv.obj.FLAG.HIDDEN)
+
+    def update(self, state):
+        rec, meters = ai_pick(state.get("ai"))
+        note = state.get("ai_note")
+        if note or not meters:
+            if not note:
+                note = ("%s: %s" % (rec.get("name", "AI"), rec.get("error"))
+                        if rec is not None else "no readings yet")
+            self.live = []
+            for i in range(len(self.rows)):
+                self._show_row(i, False)
+            self.note.set_text(note)
+            self.note.remove_flag(lv.obj.FLAG.HIDDEN)
+            return
+        self.note.add_flag(lv.obj.FLAG.HIDDEN)
+        self.live = [(rec, m) for m in meters[:len(self.rows)]]
+        for i, (name, pct, bar, marker, _left, _right) in enumerate(self.rows):
+            if i >= len(self.live):
+                self._show_row(i, False)
+                continue
+            meter = self.live[i][1]
+            value = meter.get("pct")
+            name.set_text((meter.get("label") or "").upper())
+            pct.set_text(ai_format_pct(value) if value is not None
+                         else ai_format_amount(meter))
+            lvl = ai_level(value)
+            color = (lv.color_hex(AI_LEVEL_COLORS[lvl]) if lvl is not None
+                     else self.app.fg)
+            pct.set_style_text_color(color, lv.PART.MAIN)
+            bar.set_style_bg_color(color, lv.PART.INDICATOR)
+            bar.set_value(int((value or 0) * 10), False)
+            self._show_row(i, True)
+        self.tick()
+
+    def tick(self):
+        now = time.time()
+        for (rec, meter), (_n, _p, _bar, marker, left, right) in zip(self.live, self.rows):
+            elapsed = max(0, now - (rec.get("age_base") or now))
+            if rec.get("stale") and rec.get("error"):
+                left.set_text("last reading: " + str(rec.get("error"))[:40])
+            else:
+                left.set_text(ai_format_reset(meter, elapsed))
+            if meter.get("pct") is not None and meter.get("used") is None:
+                right.set_text(ai_pace_text(meter, elapsed))
+            else:
+                right.set_text(ai_format_amount(meter))
+            expected = ai_expected_pct(meter, elapsed)
+            if expected is None:
+                marker.add_flag(lv.obj.FLAG.HIDDEN)
+            else:
+                marker.remove_flag(lv.obj.FLAG.HIDDEN)
+                marker.set_x(lv.pct(int(expected)))
+                marker.set_y(-2)
 
 
 class BlockTV(Activity):
@@ -914,6 +1078,8 @@ class BlockTV(Activity):
             value = self._make_chart(tile, field_id, w, h, small, head)
             if price is not None:
                 price.move_foreground()
+        elif field_id == "ai_usage" and h - head - 6 >= 40:
+            value = AiMeterTile(tile, self, w, h, head, small)
         else:
             value = Odometer(tile)
             # Slightly above center so the sub label fits directly below.
@@ -1302,6 +1468,10 @@ class BlockTV(Activity):
         if field_id in CHART_FIELDS:
             self._update_chart_tile(field_id)
             return
+        if isinstance(self._tile_labels[field_id][1], AiMeterTile):
+            self._tile_labels[field_id][1].update(self.state)
+            self._apply_title_color(field_id)
+            return
         (title, value, sub, max_w, max_h,
          _price, _pill_fonts) = self._tile_labels[field_id]
         value_text, sub_text = render_field(field_id, self.state)
@@ -1333,6 +1503,9 @@ class BlockTV(Activity):
         self._update_corner_clock()
         if "clock" in self._tile_labels:
             self._update_tile("clock")
+        entry = self._tile_labels.get("ai_usage")
+        if entry is not None and isinstance(entry[1], AiMeterTile):
+            entry[1].tick()
         if time.time() - self._stale_check_at >= 30:
             self._stale_check_at = time.time()
             self._check_staleness()

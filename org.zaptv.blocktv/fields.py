@@ -205,35 +205,43 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
-def ai_headline(records, now=None):
-    """(value, sub) for the AI Usage tile from ClankerTV-style records.
-
-    Shows the meter closest to its limit across every provider polled:
-    on a dashboard that is the one number worth a glance. Percentage
-    meters print as "42%"; spend meters without a limit print the amount.
-    A record kept alive from an earlier poll (`stale`) still shows, with
-    the provider's error in the caption; a provider with no readings at
-    all shows the error alone."""
-    if now is None:
-        now = time.time()
-    best = None                     # (pct, record, meter)
-    fallback = None                 # first error record, if nothing has meters
+def ai_pick(records):
+    """The record the AI Usage tile shows: the provider whose primary
+    meter is closest to its limit -- on a dashboard that is the one worth
+    a glance. Returns (record, meters); with no readings anywhere it
+    returns the first provider that reported an error and an empty list,
+    or (None, []) when there is nothing at all."""
+    best = None                     # (pct, record)
+    fallback = None
     for rec in records or []:
         meters = rec.get("meters") or []
         if not meters:
             if fallback is None and rec.get("error"):
                 fallback = rec
             continue
-        meter = meters[0]
-        pct = meter.get("pct")
+        pct = meters[0].get("pct")
         key = -1 if pct is None else pct
         if best is None or key > best[0]:
-            best = (key, rec, meter)
-    if best is None:
-        if fallback is not None:
-            return PLACEHOLDER, "%s: %s" % (fallback.get("name", "AI"), fallback.get("error"))[:60]
+            best = (key, rec)
+    if best is not None:
+        return best[1], list(best[1].get("meters") or [])
+    return fallback, []
+
+
+def ai_headline(records, now=None):
+    """(value, sub) for the one-line AI Usage rendering (small tiles and
+    the settings page). Percentage meters print as "42%"; spend meters
+    without a limit print the amount. A record kept alive from an
+    earlier poll (`stale`) still shows, with the provider's error in the
+    caption; a provider with no readings at all shows the error alone."""
+    if now is None:
+        now = time.time()
+    rec, meters = ai_pick(records)
+    if not meters:
+        if rec is not None:
+            return PLACEHOLDER, "%s: %s" % (rec.get("name", "AI"), rec.get("error"))[:60]
         return PLACEHOLDER, "no readings yet"
-    _key, rec, meter = best
+    meter = meters[0]
     pct = meter.get("pct")
     if pct is not None:
         value = "%d%%" % round(pct)
