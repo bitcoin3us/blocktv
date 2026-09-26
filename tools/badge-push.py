@@ -17,7 +17,8 @@ console: relaunch the app afterwards through AppManager.start_app instead.
 """
 import base64, hashlib, os, re, subprocess, sys, time
 
-CHUNK = 1024
+CHUNK = 1024          # starting chunk size
+MIN_CHUNK = 128       # halved down to this while the board keeps failing
 PACE = 0.3
 
 
@@ -55,30 +56,48 @@ def ex_match(port, code, pattern, tries=3):
     return None
 
 
+def verified_prefix(port, path, data):
+    """How many bytes of `data` the board provably holds at `path`: the
+    file's size if its content hashes like the same-length prefix of
+    `data`, else 0. Every recovery goes through this rather than trusting
+    a counter: an unverified truncate whose offset got mangled on the way
+    over once left the file shorter than the counter said, and nothing
+    could ever be appended again."""
+    total = len(data)
+    m = ex_match(port, "import os, hashlib, binascii\ntry:\n    n = os.stat(%r)[6]\nexcept OSError:\n    n = 0\n"
+                       "h = ''\nif n:\n    f = open(%r, 'rb'); h = binascii.hexlify(hashlib.sha256(f.read()).digest()).decode()[:12]; f.close()\n"
+                       "print('P= %%d %%s' %% (n, h))" % (path, path), r"P= (\d+) ?([0-9a-f]{12})?")
+    if not m:
+        return None
+    n, h = int(m.group(1)), m.group(2) or ""
+    if n == 0:
+        return 0
+    if n <= total and hashlib.sha256(data[:n]).hexdigest()[:12] == h:
+        return n
+    return 0
+
+
 def push(port, dest, name):
     data = open(name, "rb").read()
     total = len(data)
     path = dest.rstrip("/") + "/" + os.path.basename(name)
     want = hashlib.sha256(data).hexdigest()[:12]
-    sent = 0
-    m = ex_match(port, "import os, hashlib, binascii\ntry:\n    n = os.stat(%r)[6]\nexcept OSError:\n    n = 0\n"
-                       "h = ''\nif n:\n    f = open(%r, 'rb'); h = binascii.hexlify(hashlib.sha256(f.read()).digest()).decode()[:12]; f.close()\n"
-                       "print('P= %%d %%s' %% (n, h))" % (path, path), r"P= (\d+) ?([0-9a-f]{12})?")
-    if m:
-        n, h = int(m.group(1)), m.group(2) or ""
-        if n == total and h == want:
-            print("%s: already on the board and identical" % name)
-            return True
-        if 0 < n < total and hashlib.sha256(data[:n]).hexdigest()[:12] == h:
-            sent = n
+    sent = verified_prefix(port, path, data)
+    if sent is None:
+        print("%s: board not answering" % name)
+        return False
+    if sent == total:
+        print("%s: already on the board and identical" % name)
+        return True
     if sent == 0 and not ex_match(port, "open(%r, 'wb').close(); print('T= 0')" % path, r"T= 0"):
         print("%s: could not create the file" % name)
         return False
     print("%s: %d bytes, starting at %d" % (name, total, sent))
     t0 = time.time()
     retries = consecutive = 0
+    size = CHUNK
     while sent < total:
-        chunk = data[sent:sent + CHUNK]
+        chunk = data[sent:sent + size]
         h = hashlib.sha256(chunk).hexdigest()[:12]
         code = ("import binascii, hashlib, os\nc = binascii.a2b_base64(%r)\n"
                 "h = binascii.hexlify(hashlib.sha256(c).digest()).decode()[:12]\n"
@@ -92,16 +111,36 @@ def push(port, dest, name):
                 break
             retries += 1
             consecutive += 1
+            # Re-sync to what the board provably holds; never truncate blind.
+            have = verified_prefix(port, path, data)
+            if have is None:
+                pass
+            elif have == sent + len(chunk):
+                ok, consecutive = True, 0       # it landed; only the reply was lost
+                break
+            elif have != sent:
+                sent = have                     # continue from the proven prefix
+                break
             if consecutive >= 2:
+                # A starved console still answers a tiny ping but drops
+                # bigger pastes: shrink the chunk, and wait if even the
+                # ping goes unanswered.
+                if size > MIN_CHUNK:
+                    size = max(MIN_CHUNK, size // 2)
+                    print("  chunk at %d failing; trying %d-byte chunks" % (sent, size))
+                    break
                 print("  board not answering at %d; waiting for it..." % sent)
                 if not wait_ready(port):
                     break
-            ex(port, "f = open(%r, 'rb'); d = f.read(%d); f.close(); open(%r, 'wb').write(d)" % (path, sent, path))
             time.sleep(2)
         if not ok:
+            if consecutive < 12:
+                continue                # resynced or resized: go again from `sent`
             print("%s: chunk at %d never verified after %d retries" % (name, sent, retries))
             return False
         sent += len(chunk)
+        if size < CHUNK and consecutive == 0 and sent % (4 * size) == 0:
+            size = min(CHUNK, size * 2)    # things calmed down: grow back
         time.sleep(PACE)
     m = ex_match(port, "import hashlib, binascii, os\nprint('H= %%s %%d' %% (binascii.hexlify(hashlib.sha256(open(%r, 'rb').read()).digest()).decode()[:12], os.stat(%r)[6]))" % (path, path), r"H= ([0-9a-f]{12}) (\d+)")
     good = bool(m) and m.group(1) == want and int(m.group(2)) == total
