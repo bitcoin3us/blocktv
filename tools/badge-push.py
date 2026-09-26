@@ -30,6 +30,22 @@ def ex(port, code, timeout=60):
         return "<TIMEOUT>"
 
 
+def wait_ready(port, limit=900):
+    """Block until the board answers a trivial exec, or `limit` seconds.
+
+    The console shares the board's event loop, so anything the OS does
+    that blocks the loop for a while (the launcher's periodic network
+    checks, on the P4) makes every chunk fail until it is over. Waiting
+    for a reply costs nothing; hammering retries during the pause burns
+    the retry budget for no reason."""
+    t0 = time.time()
+    while time.time() - t0 < limit:
+        if re.search(r"READY= 1", ex(port, "print('READY= 1')", timeout=20)):
+            return True
+        time.sleep(10)
+    return False
+
+
 def ex_match(port, code, pattern, tries=3):
     for _ in range(tries):
         m = re.search(pattern, ex(port, code))
@@ -76,8 +92,12 @@ def push(port, dest, name):
                 break
             retries += 1
             consecutive += 1
+            if consecutive >= 2:
+                print("  board not answering at %d; waiting for it..." % sent)
+                if not wait_ready(port):
+                    break
             ex(port, "f = open(%r, 'rb'); d = f.read(%d); f.close(); open(%r, 'wb').write(d)" % (path, sent, path))
-            time.sleep(20 if consecutive >= 2 else 2)
+            time.sleep(2)
         if not ok:
             print("%s: chunk at %d never verified after %d retries" % (name, sent, retries))
             return False
