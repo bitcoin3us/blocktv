@@ -20,6 +20,7 @@ BlockTV — a clean, customisable Bitcoin dashboard app for
 | Supply | Circulating supply (issuance schedule) | derived |
 | Market Cap | Supply × price | derived |
 | Clock | Normal time + date (uses the OS timezone) | on-device |
+| Clock & Date | The time and the full date with equal billing, side by side in a wide tile, stacked in a tall one, one line in a small one | local clock |
 | Latest Zap | Most recent nostr zap to your npub | nostr relays (kind 9735) |
 | Wallet | Wallet balance in sats | Nostr Wallet Connect |
 | Fees | Low, median and high priority fee rates in one tile, arranged for the space: three columns, three rows, or one line | mempool.space |

@@ -37,7 +37,7 @@ import mpos.time
 from fields import (
     CHART_FIELDS, CHART_LABELS, FEE_TIERS, FIELD_CATEGORIES, FIELD_IDS,
     FIELD_SOURCES, FIELD_TITLES, MONTHS, WEEKDAYS, ai_pick, chart_series,
-    fee_layout, fmt_fee, render_field,
+    clock_layout, clock_texts, fee_layout, fmt_fee, render_field,
 )
 from market_data import (
     MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
@@ -489,6 +489,73 @@ class FeeTile:
             return
         for value, (key, _label, _hint) in zip(self.values, FEE_TIERS):
             value.set_text(fmt_fee(state.get(key)))
+
+
+class ClockDateTile:
+    """The time and the date with equal billing, laid out for the room.
+
+    Wide: the time on the left, the weekday and the full date stacked on
+    the right. Tall: the time over the date. Too small for either: one
+    line, "14:05  Sat 26 Sep". Ticks with the clock."""
+
+    def __init__(self, tile, app, w, h, top, small):
+        self.app = app
+        avail_w, avail_h = w - 8, h - top - 6
+        self.mode = clock_layout(avail_w, avail_h)
+        self.cont = lv.obj(tile)
+        _plain(self.cont)
+        self.cont.set_size(avail_w, max(1, avail_h))
+        self.cont.align(lv.ALIGN.TOP_LEFT, 0, top)
+        self.labels = []
+        def label(size, opa, align, x=0, y=0, width=None, text_align=None):
+            lab = lv.label(self.cont)
+            lab.set_style_text_font(app._value_font(size), lv.PART.MAIN)
+            lab.set_style_text_color(app.fg, lv.PART.MAIN)
+            lab.set_style_text_opa(opa, lv.PART.MAIN)
+            if width is not None:
+                lab.set_width(width)
+            if text_align is not None:
+                lab.set_style_text_align(text_align, lv.PART.MAIN)
+            lab.align(align, x, y)
+            self.labels.append(lab)
+            return lab
+        if self.mode == "side":
+            time_w = int(avail_w * 0.46)
+            time_size = fit_size("88:88", time_w, avail_h)
+            date_w = avail_w - time_w - 8
+            date_size = max(12, min(fit_size("Wednesday", date_w, avail_h // 2 - 2),
+                                    fit_size("26 September 2026", date_w, avail_h // 2 - 2),
+                                    int(time_size * 0.55)))
+            date_lh = int(date_size * 1.15)
+            y0 = max(0, (avail_h - (2 * date_lh + 4)) // 2)
+            self.time = label(time_size, lv.OPA.COVER, lv.ALIGN.LEFT_MID)
+            self.day = label(date_size, lv.OPA._80, lv.ALIGN.TOP_RIGHT, 0, y0, date_w, lv.TEXT_ALIGN.RIGHT)
+            self.date = label(date_size, lv.OPA._80, lv.ALIGN.TOP_RIGHT, 0, y0 + date_lh + 4, date_w, lv.TEXT_ALIGN.RIGHT)
+        elif self.mode == "stack":
+            time_size = fit_size("88:88", avail_w, int(avail_h * 0.62))
+            date_size = max(12, min(fit_size("Saturday 26 September 2026", avail_w, int(avail_h * 0.3)),
+                                    int(time_size * 0.5)))
+            self.time = label(time_size, lv.OPA.COVER, lv.ALIGN.TOP_MID)
+            self.date = label(date_size, lv.OPA._80, lv.ALIGN.BOTTOM_MID, 0, 0, avail_w, lv.TEXT_ALIGN.CENTER)
+            self.day = None
+        else:
+            self.time = label(fit_size("88:88  Sat 26 Sep", avail_w, avail_h), lv.OPA.COVER,
+                              lv.ALIGN.CENTER, 0, 0, avail_w, lv.TEXT_ALIGN.CENTER)
+            self.day = self.date = None
+
+    def update(self, state):
+        time_text, weekday, date, short = clock_texts(state.get("localtime"))
+        if self.mode == "side":
+            self.time.set_text(time_text)
+            self.day.set_text(weekday)
+            self.date.set_text(date)
+        elif self.mode == "stack":
+            self.time.set_text(time_text)
+            full = (weekday + " " + date) if weekday else ""
+            # The long form when it fits at this font, else the short one.
+            self.date.set_text(full if len(full) <= 20 or self.cont.get_width() >= 300 else short + " " + date.split(" ")[-1])
+        else:
+            self.time.set_text(time_text + ("  " + short if short else ""))
 
 
 class AiMeterTile:
@@ -1078,8 +1145,10 @@ class BlockTV(Activity):
         if self._page_version.get(index) != self._data_version:
             self._refresh_tiles()
             self._page_version[index] = self._data_version
-        elif "clock" in self._tile_labels:
-            self._update_tile("clock")      # minutes tick regardless
+        else:
+            for field_id in ("clock", "clock_date"):
+                if field_id in self._tile_labels:
+                    self._update_tile(field_id)     # minutes tick regardless
         self._update_corner_clock()
         self._update_ath_bar()
         self._update_dots()
@@ -1162,6 +1231,8 @@ class BlockTV(Activity):
             value = AiMeterTile(tile, self, w, h, head, small)
         elif field_id == "fee_all":
             value = FeeTile(tile, self, w, h, head, small)
+        elif field_id == "clock_date":
+            value = ClockDateTile(tile, self, w, h, head, small)
         else:
             value = Odometer(tile)
             # Slightly above center so the sub label fits directly below.
@@ -1554,6 +1625,11 @@ class BlockTV(Activity):
             self._tile_labels[field_id][1].update(self.state)
             self._apply_title_color(field_id)
             return
+        if isinstance(self._tile_labels[field_id][1], ClockDateTile):
+            self._tile_labels[field_id][1].update(self.state)
+            self._tile_labels[field_id][2].set_text("")
+            self._apply_title_color(field_id)
+            return
         if isinstance(self._tile_labels[field_id][1], FeeTile):
             _t, tile, sub = self._tile_labels[field_id][:3]
             tile.update(self.state)
@@ -1590,8 +1666,9 @@ class BlockTV(Activity):
             return
         self._refresh_clock()
         self._update_corner_clock()
-        if "clock" in self._tile_labels:
-            self._update_tile("clock")
+        for field_id in ("clock", "clock_date"):
+            if field_id in self._tile_labels:
+                self._update_tile(field_id)
         entry = self._tile_labels.get("ai_usage")
         if entry is not None and isinstance(entry[1], AiMeterTile):
             entry[1].tick()

@@ -40,6 +40,7 @@ FIELD_IDS = [
     "supply",
     "market_cap",
     "clock",
+    "clock_date",
     "zap",
     "nwc_balance",
     "ai_usage",
@@ -94,6 +95,7 @@ FIELD_TITLES = {
     "supply": "Supply",
     "market_cap": "Market Cap",
     "clock": "Clock",
+    "clock_date": "Clock & Date",
     "zap": "Latest Zap",
     "nwc_balance": "Wallet",
     "ai_usage": "AI Usage",
@@ -108,7 +110,7 @@ FIELD_CATEGORIES = (
     # Grouped by what they read like, not where the number comes from:
     # moscow time is price-derived but shown as a clock, and that is how
     # someone scanning this list will look for it.
-    ("Time", ("clock", "moscow_time", "halving")),
+    ("Time", ("clock", "clock_date", "moscow_time", "halving")),
     ("Chain", ("block_height", "supply")),
     ("Fees", ("fee_all", "fee_rate", "fee_high", "fee_low")),
     ("Wallet", ("zap", "nwc_balance")),
@@ -180,6 +182,7 @@ FIELD_SOURCES = {
     "supply": ("height",),
     "market_cap": ("height", "price"),
     "clock": (),
+    "clock_date": (),
     "zap": ("nostr",),
     "nwc_balance": ("nwc",),
     "ai_usage": ("ai",),
@@ -238,6 +241,34 @@ def duration_str(blocks):
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+FULL_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                 "Saturday", "Sunday")
+FULL_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+               "August", "September", "October", "November", "December")
+
+
+def clock_texts(lt):
+    """(time, weekday, date, short) for a localtime tuple, or placeholders:
+    "14:05", "Friday", "26 September 2026", "Fri 26 Sep"."""
+    if not lt:
+        return PLACEHOLDER, "", "", ""
+    try:
+        return ("%02d:%02d" % (lt[3], lt[4]), FULL_WEEKDAYS[lt[6]],
+                "%d %s %d" % (lt[2], FULL_MONTHS[lt[1] - 1], lt[0]),
+                "%s %d %s" % (WEEKDAYS[lt[6]], lt[2], MONTHS[lt[1] - 1]))
+    except (IndexError, TypeError):
+        return "%02d:%02d" % (lt[3], lt[4]), "", "", ""
+
+
+def clock_layout(avail_w, avail_h):
+    """How the Clock & Date tile lays itself out: "side" (time left, the
+    weekday and date stacked on the right) when wide, "stack" (time over
+    the date) when tall, "line" when too small for either."""
+    if avail_w >= 260 and avail_h >= 40:
+        return "side"
+    if avail_h >= 56:
+        return "stack"
+    return "line"
 
 
 def ai_pick(records):
@@ -402,6 +433,12 @@ def render_field(field_id, state):
         except (IndexError, TypeError):
             sub = ""
         return value, sub
+
+    if field_id == "clock_date":
+        time_text, weekday, date, short = clock_texts(state.get("localtime"))
+        if not date:
+            return time_text, ""
+        return time_text, short + " " + date.split(" ")[-1]
 
     if field_id == "zap":
         zap = state.get("zap")
