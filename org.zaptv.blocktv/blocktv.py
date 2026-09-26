@@ -2536,7 +2536,8 @@ class ScreensSettingsActivity(DragReorder, Activity):
 
         hint = lv.label(screen)
         hint.set_text("Tap a screen to edit it. Drag to reorder, or tap "
-                      + lv.SYMBOL.LIST + " to move it down.")
+                      + lv.SYMBOL.LIST + " to move it down. Swipe the strip "
+                      "on the right to scroll.")
         hint.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
         hint.set_long_mode(lv.label.LONG_MODE.WRAP)
         hint.set_width(lv.pct(100))
@@ -2553,9 +2554,14 @@ class ScreensSettingsActivity(DragReorder, Activity):
         title_h = title_font.get_line_height()
         detail_h = detail_font.get_line_height()
         self.ROW_H = 2 * pad + title_h + detail_h + 8
+        # A lane of plain page down the right-hand side, outside the
+        # container: rows swallow every touch as a drag, so once the list
+        # fills the page this strip is what is left to scroll it with.
+        lane = 44
+        cont_w = DisplayMetrics.width() - 2 * pad - lane
         n = len(self._entries)
         cont = lv.obj(screen)
-        cont.set_width(lv.pct(100))
+        cont.set_width(cont_w)
         cont.set_height(self.ROW_H * n)
         cont.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
         cont.set_style_border_width(0, lv.PART.MAIN)
@@ -2592,7 +2598,7 @@ class ScreensSettingsActivity(DragReorder, Activity):
             detail.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
             detail.set_long_mode(lv.label.LONG_MODE.DOTS)
             # Under the title, and stopping short of the handle.
-            detail.set_width(DisplayMetrics.width() - 4 * pad - 40)
+            detail.set_width(cont_w - 2 * pad - 44)
             detail.set_height(detail_h)     # one line: DOTS needs a bound to cut at
             detail.align(lv.ALIGN.TOP_LEFT, 0, title_h + 4)
 
