@@ -45,7 +45,7 @@ from market_data import (
     RANGE_SPECS, at_all_time_high, configure_point_cap, expected_points,
     extend_series, note_ath, record_fine, resample_fine, switch_currency,
 )
-from layouts import LAYOUTS, cell_rects, layout_for, layout_names
+from layouts import LAYOUTS, cell_rects, layout_for
 from odometer import Odometer
 from zap_service import ZapMonitor
 from field_picker import (
@@ -2830,111 +2830,82 @@ class ScreenEditActivity(FieldPickerActivity):
     def save_screens(self, prefs, screens):
         save_screens(prefs, screens)
 
-    def extra_buttons(self, row):
-        # Layouts are offered per field count, so the choice is made for
-        # the fields as currently selected; it is saved with them.
-        row_button(row, lv.SYMBOL.IMAGE + "  Layout", self._pick_layout, grow=1)
-
-    def _pick_layout(self):
-        intent = Intent(activity_class=LayoutPickerActivity)
-        intent.putExtra("count", len(self._selected))
-        intent.putExtra("current", self._extra.get("layout", ""))
-        intent.putExtra("fg", self._screen.get_style_text_color(lv.PART.MAIN))
-        self.startActivityForResult(intent, self._layout_chosen)
-
-    def _layout_chosen(self, result):
-        if result and result.get("result_code"):
-            self._extra["layout"] = (result.get("data") or {}).get("layout", "")
-
-
-class LayoutPickerActivity(Activity):
-    """Pick how a screen's fields are arranged, from the layouts that
-    exist for its field count. Each choice is drawn as a thumbnail with
-    the slots numbered the way the editor numbers the fields, so it is
-    clear which field lands where."""
-
-    def onCreate(self):
-        extras = self.getIntent().extras or {}
-        self.count = int(extras.get("count") or 1)
-        self.current = extras.get("current") or ""
-        screen = lv.obj()
-        screen.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
-        screen.set_flex_flow(lv.FLEX_FLOW.COLUMN)
-        screen.set_style_pad_row(8, lv.PART.MAIN)
-        screen.set_style_border_width(0, lv.PART.MAIN)
-        self.setContentView(screen)
-
-    def onResume(self, screen):
-        super().onResume(screen)
-        screen.clean()
+    def after_selected(self, screen):
+        """A strip of layout thumbnails for the fields as currently
+        selected, scrolling sideways so it takes one line however many
+        layouts a count has. The numbers are the slot order, slot 1 the
+        biggest cell; the chosen one is outlined."""
+        count = len(self._selected)
+        options = LAYOUTS.get(count) or ()
+        if len(options) < 2:
+            return
+        self._section(screen, "Layout")
         ink = screen.get_style_text_color(lv.PART.MAIN)
         accent = lv.theme_get_color_primary(None)
-        title = lv.label(screen)
-        title.set_text("Layout for {} field{}".format(self.count, "" if self.count == 1 else "s"))
-        title.set_style_text_font(FontManager.getFont(size=18), lv.PART.MAIN)
-        hint = lv.label(screen)
-        hint.set_text("Numbers are the field order in the editor; slot 1 gets the biggest cell.")
-        hint.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
-        hint.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
-        hint.set_long_mode(lv.label.LONG_MODE.WRAP)
-        hint.set_width(lv.pct(100))
+        chosen_name = layout_for(self._extra.get("layout", ""), count)[0]
+        tw = min(96, max(64, DisplayMetrics.width() // 6))
+        th = tw * 2 // 3
 
-        thumb_w = min(160, DisplayMetrics.width() // 3)
-        thumb_h = thumb_w * 2 // 3
-        options = LAYOUTS.get(self.count) or (layout_for("", self.count),)
-        default_name = options[0][0]
+        strip = lv.obj(screen)
+        strip.set_width(lv.pct(100))
+        strip.set_height(lv.SIZE_CONTENT)
+        strip.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
+        strip.set_style_border_width(0, lv.PART.MAIN)
+        strip.set_style_pad_all(0, lv.PART.MAIN)
+        strip.set_style_pad_column(8, lv.PART.MAIN)
+        strip.set_flex_flow(lv.FLEX_FLOW.ROW)
+        # Sideways only: an up-or-down swipe on the strip scrolls the page.
+        strip.set_scroll_dir(lv.DIR.HOR)
+        strip.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
+
         for layout in options:
             name = layout[0]
-            chosen = (name == self.current) or (not self.current and name == default_name)
-            row = lv.obj(screen)
-            row.set_width(lv.pct(100))
-            row.set_height(lv.SIZE_CONTENT)
-            row.set_style_pad_all(6, lv.PART.MAIN)
-            row.set_style_border_width(2 if chosen else 1, lv.PART.MAIN)
-            if chosen:
-                row.set_style_border_color(accent, lv.PART.MAIN)
-            row.set_flex_flow(lv.FLEX_FLOW.ROW)
-            row.set_style_pad_column(10, lv.PART.MAIN)
-            row.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-            row.add_flag(lv.obj.FLAG.CLICKABLE)
-            row.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
-            row.remove_flag(lv.obj.FLAG.SCROLLABLE)
-            row.add_event_cb(lambda e, n=name: self._choose(n), lv.EVENT.CLICKED, None)
-            add_focus_border(row)
-            self._thumbnail(row, layout, thumb_w, thumb_h, ink, accent if chosen else ink)
-            label = lv.label(row)
-            label.set_text(name + ("  (default)" if name == default_name else ""))
-            label.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
-        _add_floating_back(screen, self.finish)
+            chosen = name == chosen_name
+            item = lv.obj(strip)
+            item.set_size(tw + 12, th + 30)
+            item.set_style_pad_all(5, lv.PART.MAIN)
+            item.set_style_radius(6, lv.PART.MAIN)
+            item.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
+            item.set_style_border_width(2 if chosen else 1, lv.PART.MAIN)
+            item.set_style_border_color(accent if chosen else ink, lv.PART.MAIN)
+            item.set_style_border_opa(lv.OPA.COVER if chosen else lv.OPA._30, lv.PART.MAIN)
+            item.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
+            item.remove_flag(lv.obj.FLAG.SCROLLABLE)
+            item.add_flag(lv.obj.FLAG.CLICKABLE)
+            item.add_event_cb(lambda e, n=name: self._choose_layout(n), lv.EVENT.CLICKED, None)
+            add_focus_border(item)
+            box = lv.obj(item)
+            _plain(box)
+            box.set_size(tw, th)
+            box.align(lv.ALIGN.TOP_MID, 0, 0)
+            for i, (x, y, cw, ch, _rows) in enumerate(cell_rects(layout, tw, th, 2)):
+                cell = lv.obj(box)
+                cell.set_pos(x, y)
+                cell.set_size(cw, ch)
+                cell.set_style_radius(2, lv.PART.MAIN)
+                cell.set_style_border_width(1, lv.PART.MAIN)
+                cell.set_style_border_color(accent if chosen else ink, lv.PART.MAIN)
+                cell.set_style_bg_color(ink, lv.PART.MAIN)
+                cell.set_style_bg_opa(lv.OPA._10, lv.PART.MAIN)
+                cell.set_style_pad_all(0, lv.PART.MAIN)
+                cell.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
+                cell.remove_flag(lv.obj.FLAG.SCROLLABLE)
+                cell.remove_flag(lv.obj.FLAG.CLICKABLE)
+                num = lv.label(cell)
+                num.set_text(str(i + 1))
+                num.set_style_text_font(FontManager.getFont(size=10), lv.PART.MAIN)
+                num.set_style_text_color(ink, lv.PART.MAIN)
+                num.center()
+            label = lv.label(item)
+            label.set_text(name)
+            label.set_style_text_font(FontManager.getFont(size=10), lv.PART.MAIN)
+            label.set_style_text_color(ink, lv.PART.MAIN)
+            label.set_style_text_opa(lv.OPA.COVER if chosen else lv.OPA._60, lv.PART.MAIN)
+            label.set_long_mode(lv.label.LONG_MODE.DOTS)
+            label.set_width(tw)
+            label.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
+            label.align(lv.ALIGN.BOTTOM_MID, 0, 0)
 
-    def _thumbnail(self, parent, layout, w, h, ink, edge):
-        box = lv.obj(parent)
-        box.set_size(w, h)
-        box.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
-        box.set_style_border_width(0, lv.PART.MAIN)
-        box.set_style_pad_all(0, lv.PART.MAIN)
-        box.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
-        box.remove_flag(lv.obj.FLAG.SCROLLABLE)
-        box.remove_flag(lv.obj.FLAG.CLICKABLE)
-        for i, (x, y, cw, ch, _rows) in enumerate(cell_rects(layout, w, h, 3)):
-            cell = lv.obj(box)
-            cell.set_pos(x, y)
-            cell.set_size(cw, ch)
-            cell.set_style_radius(3, lv.PART.MAIN)
-            cell.set_style_border_width(1, lv.PART.MAIN)
-            cell.set_style_border_color(edge, lv.PART.MAIN)
-            cell.set_style_bg_color(ink, lv.PART.MAIN)
-            cell.set_style_bg_opa(lv.OPA._10, lv.PART.MAIN)
-            cell.set_style_pad_all(0, lv.PART.MAIN)
-            cell.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
-            cell.remove_flag(lv.obj.FLAG.SCROLLABLE)
-            cell.remove_flag(lv.obj.FLAG.CLICKABLE)
-            num = lv.label(cell)
-            num.set_text(str(i + 1))
-            num.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
-            num.set_style_text_color(ink, lv.PART.MAIN)
-            num.center()
-
-    def _choose(self, name):
-        self.setResult(True, {"layout": name})
-        self.finish()
+    def _choose_layout(self, name):
+        self._extra["layout"] = name
+        self._render()

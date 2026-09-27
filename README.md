@@ -175,8 +175,8 @@ the dashboard follows the new order.
 Each screen can be arranged in any of the layouts that exist for its
 number of fields -- for four fields, say, a plain grid, a big cell on the
 left with three stacked beside it, or a wide cell over three. Open a
-screen in Settings > Screens, tap **Layout**, and pick from the
-thumbnails; the numbers in them are the field order from the editor, and
-slot 1 is the biggest cell, so the field listed first gets the room. A
-screen with no layout chosen keeps the automatic arrangement.
+screen in Settings > Screens and pick from the strip of thumbnails under
+the selected fields (it scrolls sideways); the numbers in them are the field
+order, and slot 1 is the biggest cell, so the field listed first gets the
+room. A screen with no layout chosen keeps the automatic arrangement.
 
