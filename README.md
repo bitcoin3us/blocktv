@@ -174,7 +174,8 @@ the dashboard follows the new order.
 
 Each screen can be arranged in any of the layouts that exist for its
 number of fields -- for four fields, say, a plain grid, a big cell on the
-left with three stacked beside it, or a wide cell over three. Open a
+left with three stacked beside it, the same big cell with two beside it
+and a wide cell below, or a wide cell over three. Open a
 screen in Settings > Screens and pick from the strip of thumbnails under
 the selected fields (it scrolls sideways); the numbers in them are the field
 order, and slot 1 is the biggest cell, so the field listed first gets the

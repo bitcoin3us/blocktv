@@ -14,7 +14,9 @@ A layout is a name and a small grid with a cell per field. Cells are
 in slot order: field 1 of the screen fills slot 1, and so on, so the
 order the user gives the fields in the editor is what assigns them to
 slots. Where a layout has one bigger cell, that is slot 1: the field the
-user lists first is the one that gets the room.
+user lists first is the one that gets the room. In the "Big left" and
+"Big right" families the cells beside the big one come next, top to
+bottom, then any below it, left to right.
 
 The first layout for each count is the arrangement the app always used
 before layouts were a choice, so a screen with no layout set looks as it
@@ -34,6 +36,8 @@ LAYOUTS = {
         ("Wide over two", 2, 2, ((0, 0, 2, 1), (0, 1), (1, 1))),
         ("Big left", 2, 2, ((0, 0, 1, 2), (1, 0), (1, 1))),
         ("Big right", 2, 2, ((1, 0, 1, 2), (0, 0), (0, 1))),
+        ("Big left, wide below", 3, 3, ((0, 0, 2, 2), (2, 0, 1, 2), (0, 2, 3, 1))),
+        ("Big right, wide below", 3, 3, ((1, 0, 2, 2), (0, 0, 1, 2), (0, 2, 3, 1))),
         ("Stacked", 1, 3, ((0, 0), (0, 1), (0, 2))),
         ("Columns", 3, 1, ((0, 0), (1, 0), (2, 0))),
     ),
@@ -41,6 +45,8 @@ LAYOUTS = {
         ("Grid", 2, 2, ((0, 0), (1, 0), (0, 1), (1, 1))),
         ("Big left", 2, 3, ((0, 0, 1, 3), (1, 0), (1, 1), (1, 2))),
         ("Big right", 2, 3, ((1, 0, 1, 3), (0, 0), (0, 1), (0, 2))),
+        ("Big left, wide below", 3, 3, ((0, 0, 2, 2), (2, 0), (2, 1), (0, 2, 3, 1))),
+        ("Big right, wide below", 3, 3, ((1, 0, 2, 2), (0, 0), (0, 1), (0, 2, 3, 1))),
         ("Wide over three", 3, 2, ((0, 0, 3, 1), (0, 1), (1, 1), (2, 1))),
         ("Three over wide", 3, 2, ((0, 0), (1, 0), (2, 0), (0, 1, 3, 1))),
         ("Stacked", 1, 4, ((0, 0), (0, 1), (0, 2), (0, 3))),
@@ -51,12 +57,17 @@ LAYOUTS = {
         ("Wide over four", 2, 3, ((0, 0, 2, 1), (0, 1), (1, 1), (0, 2), (1, 2))),
         ("Big left", 2, 4, ((0, 0, 1, 4), (1, 0), (1, 1), (1, 2), (1, 3))),
         ("Big right", 2, 4, ((1, 0, 1, 4), (0, 0), (0, 1), (0, 2), (0, 3))),
+        ("Big left, one below", 3, 3, ((0, 0, 2, 2), (2, 0), (2, 1), (2, 2), (0, 2, 2, 1))),
+        ("Big right, one below", 3, 3, ((1, 0, 2, 2), (0, 0), (0, 1), (0, 2), (1, 2, 2, 1))),
         ("Stacked", 1, 5, ((0, 0), (0, 1), (0, 2), (0, 3), (0, 4))),
     ),
     6: (
         ("Grid, two wide", 2, 3, ((0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2))),
         ("Grid, three wide", 3, 2, ((0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1))),
-        ("Big left", 3, 2, ((0, 0, 1, 2), (1, 0), (2, 0), (1, 1), (2, 1))),
+        ("Big left", 2, 5, ((0, 0, 1, 5), (1, 0), (1, 1), (1, 2), (1, 3), (1, 4))),
+        ("Big right", 2, 5, ((1, 0, 1, 5), (0, 0), (0, 1), (0, 2), (0, 3), (0, 4))),
+        ("Big left, two below", 3, 3, ((0, 0, 2, 2), (2, 0), (2, 1), (2, 2), (0, 2), (1, 2))),
+        ("Big right, two below", 3, 3, ((1, 0, 2, 2), (0, 0), (0, 1), (0, 2), (1, 2), (2, 2))),
         ("Stacked", 1, 6, ((0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (0, 5))),
     ),
     7: (
@@ -64,10 +75,14 @@ LAYOUTS = {
         ("Wide over six", 2, 4, ((0, 0, 2, 1), (0, 1), (1, 1), (0, 2), (1, 2), (0, 3), (1, 3))),
         ("Three wide, wide last", 3, 3, ((0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1), (0, 2, 3, 1))),
         ("Big left", 3, 3, ((0, 0, 1, 3), (1, 0), (2, 0), (1, 1), (2, 1), (1, 2), (2, 2))),
+        ("Big left, two below", 3, 4, ((0, 0, 2, 3), (2, 0), (2, 1), (2, 2), (2, 3), (0, 3), (1, 3))),
+        ("Big right, two below", 3, 4, ((1, 0, 2, 3), (0, 0), (0, 1), (0, 2), (0, 3), (1, 3), (2, 3))),
     ),
     8: (
         ("Grid, two wide", 2, 4, ((0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2), (0, 3), (1, 3))),
         ("Grid, four wide", 4, 2, ((0, 0), (1, 0), (2, 0), (3, 0), (0, 1), (1, 1), (2, 1), (3, 1))),
+        ("Big left, three below", 4, 4, ((0, 0, 3, 3), (3, 0), (3, 1), (3, 2), (3, 3), (0, 3), (1, 3), (2, 3))),
+        ("Big right, three below", 4, 4, ((1, 0, 3, 3), (0, 0), (0, 1), (0, 2), (0, 3), (1, 3), (2, 3), (3, 3))),
     ),
 }
 
