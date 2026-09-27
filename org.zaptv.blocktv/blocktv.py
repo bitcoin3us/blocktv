@@ -25,6 +25,7 @@ import lvgl as lv
 from mpos import (
     Activity,
     add_focus_border,
+    ConnectivityManager,
     DisplayMetrics,
     FontManager,
     Intent,
@@ -59,7 +60,7 @@ from clankertv_core import (
 )
 from clankertv_providers import (
     SOURCE_TYPES as AI_SOURCE_TYPES, build_sources as ai_build_sources,
-    fetch_all as ai_fetch_all,
+    fetch_all as ai_fetch_all, offline_results as ai_offline_results,
 )
 
 # Defaults chosen by probing each relay for kind-9735 zap receipts, not
@@ -2140,6 +2141,14 @@ class BlockTV(Activity):
             value = AI_POLL_DEFAULT
         return max(AI_POLL_MIN, value)
 
+    def _ai_online(self):
+        """Whether the OS believes the board has a network. Any doubt
+        counts as online, so a missing manager never blanks the tile."""
+        try:
+            return ConnectivityManager.get().is_online()
+        except Exception:
+            return True
+
     async def _ai_loop(self, gen):
         """Poll the usage sources only while an AI Usage field is on a
         screen: a Claude poll costs a token, so nothing is spent for a
@@ -2159,7 +2168,13 @@ class BlockTV(Activity):
             else:
                 self.state["ai_note"] = None
                 try:
-                    results = await ai_fetch_all(sources)
+                    if self._ai_online():
+                        results = await ai_fetch_all(sources)
+                    else:
+                        # With no network the poll cannot leave the board:
+                        # say so, rather than the stack's bare errno, and
+                        # spend no Claude token on the attempt.
+                        results = ai_offline_results(sources)
                     now = time.time()
                     self.state["ai"] = ai_merge_records(self.state.get("ai") or [],
                                                         results, now)
