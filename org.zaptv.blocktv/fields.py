@@ -247,11 +247,44 @@ FULL_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
                "August", "September", "October", "November", "December")
 
 
+# A board that starts without network has no time until network time
+# answers, and until then its clock counts up from 1 January 2000. No
+# real reading predates this app, so an earlier year means "not set".
+CLOCK_MIN_YEAR = 2025
+CLOCK_UNSET = "--:--"
+
+
+def clock_is_set(lt):
+    """True for a localtime tuple read from a clock that has been set."""
+    return bool(lt) and lt[0] >= CLOCK_MIN_YEAR
+
+
+def stamp_is_set(t):
+    """True for a time.time() stamp taken while the clock was set."""
+    try:
+        return time.gmtime(int(t))[0] >= CLOCK_MIN_YEAR
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def lateness(stamp, cadence, now):
+    """Seconds a source is past its cadence, or None when that cannot be
+    known: a stamp taken on a set clock read against an unset one. That is
+    a reading cached before a restart that brought no network time, and
+    subtracting would give it a huge negative age, passing it as fresh."""
+    if stamp_is_set(stamp) and not stamp_is_set(now):
+        return None
+    return now - stamp - cadence
+
+
 def clock_texts(lt):
     """(time, weekday, date, short) for a localtime tuple, or placeholders:
-    "14:05", "Friday", "26 September 2026", "Fri 26 Sep"."""
+    "14:05", "Friday", "26 September 2026", "Fri 26 Sep". A clock that has
+    not been set gives "--:--" and says so rather than showing 2000."""
     if not lt:
         return PLACEHOLDER, "", "", ""
+    if not clock_is_set(lt):
+        return CLOCK_UNSET, "Clock not set", "", "not set"
     try:
         return ("%02d:%02d" % (lt[3], lt[4]), FULL_WEEKDAYS[lt[6]],
                 "%d %s %d" % (lt[2], FULL_MONTHS[lt[1] - 1], lt[0]),
@@ -427,6 +460,8 @@ def render_field(field_id, state):
         lt = state.get("localtime")
         if not lt:
             return PLACEHOLDER, ""
+        if not clock_is_set(lt):
+            return CLOCK_UNSET, "not set"
         value = "%02d:%02d" % (lt[3], lt[4])
         try:
             sub = "%s %d %s" % (WEEKDAYS[lt[6]], lt[2], MONTHS[lt[1] - 1])
@@ -437,7 +472,7 @@ def render_field(field_id, state):
     if field_id == "clock_date":
         time_text, weekday, date, short = clock_texts(state.get("localtime"))
         if not date:
-            return time_text, ""
+            return time_text, short
         return time_text, short + " " + date.split(" ")[-1]
 
     if field_id == "zap":

@@ -38,7 +38,8 @@ import mpos.time
 from fields import (
     CHART_FIELDS, CHART_LABELS, FEE_TIERS, FIELD_CATEGORIES, FIELD_IDS,
     FIELD_SOURCES, FIELD_TITLES, MONTHS, WEEKDAYS, ai_pick, chart_series,
-    clock_layout, clock_texts, fee_layout, fmt_fee, render_field,
+    clock_is_set, clock_layout, clock_texts, fee_layout, fmt_fee, lateness,
+    render_field, stamp_is_set,
 )
 from market_data import (
     MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
@@ -552,7 +553,7 @@ class ClockDateTile:
             self.date.set_text(date)
         elif self.mode == "stack":
             self.time.set_text(time_text)
-            full = (weekday + " " + date) if weekday else ""
+            full = (weekday + " " + date).strip() if weekday else ""
             # The long form when it fits at this font, else the short one.
             self.date.set_text(full if len(full) <= 20 or self.cont.get_width() >= 300 else short + " " + date.split(" ")[-1])
         else:
@@ -735,6 +736,7 @@ class BlockTV(Activity):
         self._page_tiles = {}
         self._chart_loading = {}
         self._started_at = time.time()   # so a source that never reports ages
+        self._clock_was_set = None       # for noticing network time arriving
         self._ath_scan_at = 0
         self._history_active = False
         self._history_started = 0
@@ -1008,6 +1010,7 @@ class BlockTV(Activity):
         """Warning color for a field's title, or None when fresh.
         Unconfigured nostr/NWC sources are not warnings."""
         stamps = self.state.get("updated_at") or {}
+        now = time.time()
         worst = None
         for source in FIELD_SOURCES.get(field_id, ()):
             if source == "nostr" and not self.zap_npub:
@@ -1027,7 +1030,13 @@ class BlockTV(Activity):
                     stamp, cadence = self._started_at, self._source_cadence(source)
                 else:
                     continue
-            late = time.time() - stamp - cadence
+            late = lateness(stamp, cadence, now)
+            if late is None:
+                # Cached before a restart that brought no network time:
+                # at least as old as this boot, and quite possibly older,
+                # so never fresh.
+                late = max(STALE_ORANGE_SECONDS,
+                           time.ticks_ms() // 1000 - cadence)
             if worst is None or late > worst:
                 worst = late
         if worst is None:
@@ -1568,11 +1577,14 @@ class BlockTV(Activity):
         if not lt:
             return
         clock = "%02d:%02d" % (lt[3], lt[4])
-        try:
-            text = "%s %d %s | %s" % (WEEKDAYS[lt[6]], lt[2],
-                                      MONTHS[lt[1] - 1], clock)
-        except (IndexError, TypeError):
-            text = clock                   # time alone if the date is odd
+        if not clock_is_set(lt):
+            text = "clock not set"
+        else:
+            try:
+                text = "%s %d %s | %s" % (WEEKDAYS[lt[6]], lt[2],
+                                          MONTHS[lt[1] - 1], clock)
+            except (IndexError, TypeError):
+                text = clock               # time alone if the date is odd
         try:
             self._corner_clock.set_text(text)
         except Exception:
@@ -1666,6 +1678,10 @@ class BlockTV(Activity):
         if not self.has_foreground():
             return
         self._refresh_clock()
+        clock_set = clock_is_set(self.state.get("localtime"))
+        if clock_set and self._clock_was_set is False:
+            self._rebase_unset_stamps()
+        self._clock_was_set = clock_set
         self._update_corner_clock()
         for field_id in ("clock", "clock_date"):
             if field_id in self._tile_labels:
@@ -1678,6 +1694,24 @@ class BlockTV(Activity):
             self._check_staleness()
         if self._splash and self._splash_until and time.time() >= self._splash_until:
             self._hide_splash()
+
+    def _rebase_unset_stamps(self):
+        """Network time has just arrived after a start without it. Stamps
+        taken before that count from 1 January 2000, so they would now read
+        as decades old: move them to now. That understates their age by at
+        most the wait for network time, which beats every title turning red
+        at the moment the board comes online."""
+        now = time.time()
+        for key in ("updated_at", "fetched_at", "charts_ts"):
+            stamps = self.state.get(key) or {}
+            for name, when in list(stamps.items()):
+                if when is not None and not stamp_is_set(when):
+                    stamps[name] = now
+        for rec in self.state.get("ai") or []:
+            if rec.get("age_base") is not None and not stamp_is_set(rec["age_base"]):
+                rec["age_base"] = now
+        if not stamp_is_set(self._started_at):
+            self._started_at = now
 
     # --- Market data ---
 
