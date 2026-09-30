@@ -17,7 +17,7 @@ key you would rather not put on the badge) belong in the bridge instead.
 import json
 import logging
 
-import clankertv_core as core
+import blocktv_clankertv_core as core
 
 logger = logging.getLogger(__name__)
 

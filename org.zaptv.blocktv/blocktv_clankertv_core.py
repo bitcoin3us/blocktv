@@ -379,13 +379,30 @@ def claude_from_headers(headers, now_epoch, pid="claude", name="Claude"):
                         kind="claude")
 
 
-# Buckets reported by the OAuth usage endpoint, in display order.
+# Buckets reported by the OAuth usage endpoint, in display order. Any
+# other `seven_day_<model>` key the endpoint adds (fable, ...) is shown
+# too, as "Weekly <Model>", so new model-specific limits appear without
+# an app update.
 _CLAUDE_USAGE_BUCKETS = (
     ("five_hour", "Session", WINDOW_5H),
     ("seven_day", "Weekly", WINDOW_7D),
     ("seven_day_opus", "Weekly Opus", WINDOW_7D),
     ("seven_day_sonnet", "Weekly Sonnet", WINDOW_7D),
+    ("seven_day_fable", "Weekly Fable", WINDOW_7D),
 )
+
+
+def _usage_bucket_keys(obj):
+    known = [k for k, _, _ in _CLAUDE_USAGE_BUCKETS]
+    extra = sorted(k for k in obj if isinstance(k, str) and k.startswith("seven_day_")
+                   and k not in known and isinstance(obj.get(k), dict))
+    return [(k, label, w) for k, label, w in _CLAUDE_USAGE_BUCKETS] + [
+        (k, "Weekly " + _title_words(k[len("seven_day_"):]), WINDOW_7D) for k in extra]
+
+
+def _title_words(snake):
+    # MicroPython's str has no title().
+    return " ".join(w[:1].upper() + w[1:] for w in snake.split("_") if w)
 
 
 def claude_from_usage_api(obj, now_epoch, pid="claude", name="Claude"):
@@ -398,7 +415,7 @@ def claude_from_usage_api(obj, now_epoch, pid="claude", name="Claude"):
     if not isinstance(obj, dict):
         return None
     meters = []
-    for key, label, window in _CLAUDE_USAGE_BUCKETS:
+    for key, label, window in _usage_bucket_keys(obj):
         bucket = obj.get(key)
         if not isinstance(bucket, dict):
             continue

@@ -35,31 +35,31 @@ from mpos import (
 )
 import mpos.time
 
-from fields import (
+from blocktv_fields import (
     CHART_FIELDS, CHART_LABELS, FEE_TIERS, FIELD_CATEGORIES, FIELD_IDS,
     FIELD_SOURCES, FIELD_TITLES, MONTHS, WEEKDAYS, ai_pick, chart_series,
-    clock_is_set, clock_layout, clock_texts, fee_layout, fmt_fee, lateness,
-    render_field, stamp_is_set,
+    clock_is_set, clock_layout, clock_texts, fee_layout, fmt_fee, fmt_int,
+    lateness, render_field, stamp_is_set,
 )
-from market_data import (
+from blocktv_market_data import (
     MarketData, CURRENCIES, DEFAULT_BASE_URL, DEFAULT_RANGE,
     DERIVED_CURRENCIES, FINE_SLOT_SECONDS, FINE_SLOTS, RANGE_REFRESH,
     RANGE_SPECS, at_all_time_high, configure_point_cap, expected_points,
     extend_series, note_ath, record_fine, resample_fine, switch_currency,
 )
-from layouts import LAYOUTS, cell_rects, layout_for
-from odometer import Odometer
-from zap_service import ZapMonitor
-from field_picker import (
+from blocktv_layouts import LAYOUTS, cell_rects, layout_for
+from blocktv_odometer import Odometer
+from blocktv_zap_service import ZapMonitor
+from blocktv_field_picker import (
     DragReorder, FieldPickerActivity, button_row, row_button, no_scroll_chain,
 )
-from clankertv_core import (
+from blocktv_clankertv_core import (
     expected_pct as ai_expected_pct, format_amount as ai_format_amount,
     format_pct as ai_format_pct, format_reset as ai_format_reset,
     level as ai_level, merge_records as ai_merge_records,
     pace_text as ai_pace_text,
 )
-from clankertv_providers import (
+from blocktv_clankertv_providers import (
     SOURCE_TYPES as AI_SOURCE_TYPES, build_sources as ai_build_sources,
     fetch_all as ai_fetch_all, offline_results as ai_offline_results,
 )
@@ -2026,7 +2026,6 @@ class BlockTV(Activity):
 
         amount = lv.label(splash)
         sats = zap.get("sats")
-        from fields import fmt_int
         amount_text = "+{} sats".format(fmt_int(sats)) if sats is not None else "zap!"
         amount.set_text(amount_text)
         amount.set_style_text_color(self.bg, lv.PART.MAIN)

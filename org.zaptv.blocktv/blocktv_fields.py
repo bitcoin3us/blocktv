@@ -7,7 +7,7 @@
 # License, or (at your option) any later version. It is distributed WITHOUT
 # ANY WARRANTY; see the GNU General Public License (LICENSE) for details.
 
-# fields.py — BlockTV field registry, derived metrics and formatting.
+# blocktv_fields.py — BlockTV field registry, derived metrics and formatting.
 #
 # Every displayable data field has an id, a title, and a render function
 # that maps the shared `state` dict to (value_text, sub_text). Keeping
@@ -17,6 +17,8 @@
 import time
 
 from mpos import NumberFormat
+
+from blocktv_market_data import fine_series
 
 HALVING_INTERVAL = 210000
 SATS_PER_BTC = 100_000_000
@@ -70,7 +72,6 @@ def chart_series(field_id, state):
     has filled in."""
     label = CHART_LABELS.get(field_id, "24h")
     if label == "24h":
-        from market_data import fine_series
         fine = fine_series(state)
         if len(fine) >= 2:
             return fine
