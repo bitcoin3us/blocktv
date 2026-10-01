@@ -24,8 +24,7 @@ Outputs, all indexed-palette PNG with a tRNS chunk (older MicroPythonOS
 lodepng builds silently fail to draw RGBA truecolour PNGs):
 
     icon_64x64.png                             launcher icon
-    res/drawable-mdpi/blocktv_logo_light.png   splash and About lockup
-    res/drawable-mdpi/blocktv_logo_dark.png    the same lockup
+    res/drawable-mdpi/blocktv_lockup.png       splash and About lockup
 
 The launcher icon is the whole mark viewBox fitted to the tile width
 (64x57) and centred vertically (y=3) in a fully transparent tile, the
@@ -34,9 +33,12 @@ convention the whole ZapTV family follows.
 The lockup is composed here from the two sources: the mark on the left,
 the wordmark on the right, mark height 2.2x the wordmark's viewBox height,
 a gap of 0.35x that height, and the wordmark centred vertically on the
-mark. The light and dark files hold the SAME artwork: the cream halo lets
-one design work on both themes, and keeping both names means the app's
-theme switch needs no change.
+mark. One image serves both themes: the cream halo keeps the dark ink
+readable on a dark background. When an output changes size, give it a new
+file name (and update blocktv.py): LVGL caches image headers by path until
+reboot, so a same-named file replaced in place is drawn at the old size
+with its rows wrapped. blocktv_lockup.png replaced blocktv_logo_light.png
+and blocktv_logo_dark.png for that reason.
 
 Renders with rsvg-convert (brew install librsvg), which ignores the mark's
 CSS animation and draws its resting frame. Everything is rendered large
@@ -172,11 +174,11 @@ def main():
 
     print("building from %s" % os.path.relpath(ART, ROOT))
     changed = write(build_icon(), "icon_64x64.png", check)
-    lockup = build_lockup()
-    changed |= write(lockup, "res/drawable-mdpi/blocktv_logo_light.png", check)
-    changed |= write(lockup, "res/drawable-mdpi/blocktv_logo_dark.png", check)
+    changed |= write(build_lockup(), "res/drawable-mdpi/blocktv_lockup.png", check)
     print("done:", "changes pending" if (check and changed) else
           ("updated" if changed else "everything already current"))
+    if check and changed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

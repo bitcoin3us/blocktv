@@ -84,13 +84,13 @@ MAX_FIELDS_PER_SCREEN = 8
 SPLASH_SECONDS = 5
 LOGO_SPLASH_MS = 2000       # start-screen logo duration (tap to skip)
 LOGO_TAP_GRACE = 0.7        # ignore taps this long after the logo appears
-# The horizontal logo lockup (TV mark plus wordmark), under a light-theme
-# and a dark-theme name. The family artwork's cream halo reads on light and
-# dark backgrounds alike, so both files currently hold the same image
-# (tools/build_assets.py writes both); the light/dark choice is kept so
-# the two could diverge again without a code change.
-LOGO_ASSET_LIGHT = "blocktv_logo_light.png"
-LOGO_ASSET_DARK = "blocktv_logo_dark.png"
+# The horizontal logo lockup (TV mark plus wordmark), written by
+# tools/build_assets.py. The family artwork's cream halo reads on light and
+# dark backgrounds alike, so one image serves every theme. Artwork whose
+# size changes needs a new file name: LVGL caches image headers by path
+# until reboot, so a same-named replacement installed in place is drawn at
+# the old size, its rows wrapped.
+LOGO_ASSET = "blocktv_lockup.png"
 ATH_TEXT = "OPEN WATER BITCOIN"
 ATH_YELLOW = 0xFFD400      # highlighter yellow; text is knocked out in black
 ATH_BAR_H = 24             # leaves the clock, dots and cog their own line
@@ -1789,12 +1789,7 @@ class BlockTV(Activity):
         overlay.add_event_cb(lambda e: self._logo_tapped(),
                              lv.EVENT.CLICKED, None)
 
-        # The asset follows the background's brightness. Both currently
-        # hold the same artwork, whose cream halo works on either (see
-        # LOGO_ASSET_LIGHT).
-        asset = (LOGO_ASSET_LIGHT if _lum(self._bg_hex) > 140
-                 else LOGO_ASSET_DARK)
-        path = resolve_drawable(self.appFullName, asset)
+        path = resolve_drawable(self.appFullName, LOGO_ASSET)
         shown = False
         if path:
             try:
@@ -2638,18 +2633,7 @@ class AboutActivity(Activity):
         _add_floating_back(screen, self.finish)
 
     def _add_logo(self, screen):
-        # Settings screens wear the OS theme rather than the app's colours,
-        # so the light/dark asset is chosen from the theme's own
-        # background, not from the user's background pref (both currently
-        # hold the same artwork; see LOGO_ASSET_LIGHT).
-        asset = LOGO_ASSET_DARK
-        try:
-            c = screen.get_style_bg_color(lv.PART.MAIN)
-            if _lum((c.red << 16) | (c.green << 8) | c.blue) > 140:
-                asset = LOGO_ASSET_LIGHT
-        except Exception:
-            pass
-        path = resolve_drawable(self.appFullName, asset)
+        path = resolve_drawable(self.appFullName, LOGO_ASSET)
         if path:
             try:
                 img = lv.image(screen)
