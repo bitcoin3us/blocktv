@@ -2672,22 +2672,35 @@ class AboutActivity(Activity):
         label.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
 
     def _add_fact(self, screen, name, value):
-        row = button_row(screen)
-        row.set_flex_align(lv.FLEX_ALIGN.SPACE_BETWEEN, lv.FLEX_ALIGN.CENTER,
-                           lv.FLEX_ALIGN.CENTER)
-        left = lv.label(row)
-        left.set_text(name)
-        left.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
-        left.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
-        right = lv.label(row)
-        right.set_text(value)
-        right.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
-        # Board names run long (Waveshare ESP32 S3 Touch LCD 2); wrap rather
-        # than clip, since a half-shown board name is no use in a bug report.
-        right.set_long_mode(lv.label.LONG_MODE.WRAP)
-        right.set_style_text_line_space(ABOUT_LINE_SPACE, lv.PART.MAIN)
-        right.set_flex_grow(1)
-        right.set_style_text_align(lv.TEXT_ALIGN.RIGHT, lv.PART.MAIN)
+        # "Name: value" on one centred line, the name dimmed, so the value
+        # sits next to its name however wide the screen. One wrapping label
+        # puts the rest of a long value (Waveshare ESP32 S3 Touch LCD 3 5)
+        # on a second line, centred under the first. A recolour command
+        # dims the name to the theme's text colour at 60% over the screen,
+        # which is what 60% opacity draws. Not a span group: with a negative
+        # line space, LVGL's span drawing skips a line's last two rows in
+        # any redraw strip that starts on them, clipping descenders.
+        fact = lv.label(screen)
+        fact.set_width(lv.pct(100))
+        fact.set_long_mode(lv.label.LONG_MODE.WRAP)
+        fact.set_style_text_font(FontManager.getFont(size=14), lv.PART.MAIN)
+        fact.set_style_text_line_space(ABOUT_LINE_SPACE, lv.PART.MAIN)
+        fact.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
+        line = "%s: %s" % (name, value)
+        if "#" in line:
+            # LVGL draws "##" as '#' but measures it as a command, so a
+            # recoloured value with a '#' in it would centre and wrap as if
+            # it were shorter. Show such a fact plain, name not dimmed.
+            fact.set_text(line)
+            return
+        text = fact.get_style_text_color(lv.PART.MAIN)
+        bg = screen.get_style_bg_color(lv.PART.MAIN)
+        opa = lv.OPA._60
+        dim = "".join("%02x" % ((t * opa + b * (255 - opa) + 127) // 255)
+                      for t, b in ((text.red, bg.red), (text.green, bg.green),
+                                   (text.blue, bg.blue)))
+        fact.set_recolor(True)
+        fact.set_text("#%s %s:# %s" % (dim, name, value))
 
 
 class ScreensSettingsActivity(DragReorder, Activity):

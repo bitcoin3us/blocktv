@@ -9,12 +9,13 @@
 
 """The About screen follows the layout every ZapTV app shares.
 
-Top to bottom: the logo lockup, LOGO_H (44 px) tall; a facts table with the
-app version (read from MANIFEST.JSON at runtime), the MicroPythonOS version
-and the hardware; the site; and a footer with the credit, the legal notice
-and the third-party line. It must fit a 320x240 screen without scrolling,
-even with the longest board name, without any text running under the back
-button in the bottom-right corner, and in the OS light or dark theme.
+Top to bottom: the logo lockup, LOGO_H (44 px) tall; three facts, each one
+centred "Name: value" line with the name dimmed: the app version (read from
+MANIFEST.JSON at runtime), the MicroPythonOS version and the hardware; the
+site; and a footer with the credit, the legal notice and the third-party
+line. It must fit a 320x240 screen without scrolling, even with the longest
+board name, without any text running under the back button in the
+bottom-right corner, and in the OS light or dark theme.
 
 This is a graphical test for the MicroPythonOS desktop build. From a
 MicroPythonOS checkout, with the app linked in:
@@ -79,8 +80,10 @@ def _overlap(a, b):
 
 def _content(screen):
     """The About screen top to bottom, as tuples: ("image",),
-    ("label", text) or ("fact", name, value). The floating back button is
-    returned on its own."""
+    ("label", text) or ("fact", name, value). Anything else comes back as
+    ("recolour", text) or ("other", type name), so a layout change fails
+    the comparison readably. The floating back button is returned on its
+    own."""
     items, back = [], None
     for i in range(screen.get_child_count()):
         child = screen.get_child(i)
@@ -88,13 +91,38 @@ def _content(screen):
             back = child
         elif isinstance(child, lv.image):
             items.append(("image",))
+        elif isinstance(child, lv.label) and child.get_recolor():
+            items.append(_fact(child) or ("recolour", child.get_text()))
         elif isinstance(child, lv.label):
             items.append(("label", child.get_text()))
         else:
-            items.append(("fact",) + tuple(
-                child.get_child(j).get_text()
-                for j in range(child.get_child_count())))
+            items.append(("other", type(child).__name__))
     return items, back
+
+
+def _fact(label):
+    """("fact", name, value) from a fact label's "#rrggbb Name:# value"
+    text, or None if it is not one."""
+    text = label.get_text()
+    if not text.startswith("#") or ":# " not in text:
+        return None
+    colour, rest = text[1:].split(" ", 1)
+    if len(colour) != 6 or any(c not in "0123456789abcdefABCDEF"
+                               for c in colour):
+        return None
+    name, value = rest.split(":# ", 1)
+    return ("fact", name, value)
+
+
+def _dim(label):
+    """The colour a fact label's recolour command gives its name."""
+    return label.get_text()[1:7].lower()
+
+
+def _mix60(text_rgb, bg_rgb):
+    """text at 60% opacity over bg, as rrggbb."""
+    return "".join("%02x" % ((t * 153 + b * 102 + 127) // 255)
+                   for t, b in zip(text_rgb, bg_rgb))
 
 
 def _drawn(obj, out):
@@ -212,15 +240,21 @@ class TestBlockTVAbout(unittest.TestCase):
         fonts = {size: FontManager.getFont(size=size).line_height
                  for size in (12, 14, 16)}
         for i in (1, 2, 3):
-            for j in (0, 1):
-                label = screen.get_child(i).get_child(j)
-                self.assertEqual(label.get_style_text_font(0).line_height,
-                                 fonts[14])
-            name = screen.get_child(i).get_child(0)
-            self.assertEqual(name.get_style_text_opa(0), lv.OPA._60)
-            value = screen.get_child(i).get_child(1)
-            self.assertEqual(value.get_style_text_align(0),
-                             lv.TEXT_ALIGN.RIGHT)
+            # One centred, wrapping line across the content width, at the
+            # screen's full text strength; only the recoloured name is dim
+            # (test_colours checks its colour).
+            fact = screen.get_child(i)
+            self.assertTrue(isinstance(fact, lv.label) and fact.get_recolor())
+            self.assertEqual(fact.get_style_text_font(0).line_height,
+                             fonts[14])
+            self.assertEqual(fact.get_style_text_align(0),
+                             lv.TEXT_ALIGN.CENTER)
+            self.assertEqual(fact.get_long_mode(), lv.label.LONG_MODE.WRAP)
+            self.assertEqual(fact.get_width(), screen.get_content_width())
+            self.assertEqual(fact.get_style_text_line_space(0),
+                             blocktv.ABOUT_LINE_SPACE)
+            self.assertEqual(fact.get_style_text_opa(0), lv.OPA.COVER)
+            self.assertEqual(fact.get_style_opa(0), lv.OPA.COVER)
         self.assertEqual(
             screen.get_child(4).get_style_text_font(0).line_height, fonts[16])
         for i in (5, 6, 7):
@@ -253,6 +287,17 @@ class TestBlockTVAbout(unittest.TestCase):
         self.assertEqual(items[1], ("fact", "BlockTV", "9.8.7-test"))
         self.assertEqual(tried[0], f"/apps/{FULLNAME}/MANIFEST.JSON")
 
+    def test_a_hash_in_a_fact_shows_it_plain(self):
+        # LVGL measures its "##" escape as a command, so a fact with a '#'
+        # in it is shown plain rather than mis-centred: no dimmed name.
+        BuildInfo.version.release = "1.0#rc2"
+        screen = self._open_about()
+        fact = screen.get_child(2)
+        self.assertFalse(fact.get_recolor())
+        self.assertEqual(fact.get_text(), "MicroPythonOS: 1.0#rc2")
+        self.assertTrue(screen.get_child(1).get_recolor())  # the others dim
+        self.assertTrue(screen.get_child(3).get_recolor())
+
     def test_facts_fall_back_to_unknown(self):
         def no_file(path, *args):
             raise OSError(2)
@@ -282,7 +327,7 @@ class TestBlockTVAbout(unittest.TestCase):
                          (320, 240))
         DeviceInfo.set_hardware_id(LONG_BOARD)
         screen = self._open_about()
-        hardware = screen.get_child(3).get_child(1)
+        hardware = screen.get_child(3)
         self.assertTrue(hardware.get_height() > 20, "board name did not wrap")
         overflow = screen.get_scroll_bottom()
         self.assertTrue(overflow <= 0, f"About scrolls by {overflow} px")
@@ -295,7 +340,8 @@ class TestBlockTVAbout(unittest.TestCase):
         box = _coords(back)
         self.assertEqual(box, (w - 50, h - 50, w - 1, h - 1))
         for obj in _drawn(screen, []):
-            text = obj.get_text() if isinstance(obj, lv.label) else "logo"
+            text = (obj.get_text() if isinstance(obj, lv.label)
+                    else type(obj).__name__)
             self.assertFalse(_overlap(_coords(obj), box),
                              f"{text!r} runs under the back button")
         back.send_event(lv.EVENT.CLICKED, None)
@@ -318,6 +364,14 @@ class TestBlockTVAbout(unittest.TestCase):
                 if isinstance(label, lv.label):
                     self.assertEqual(_rgb(label.get_style_text_color(0)),
                                      expected[1], label.get_text())
+                if isinstance(label, lv.label) and label.get_recolor():
+                    # The name: the theme's text at 60% over its background.
+                    self.assertEqual(_dim(label),
+                                     _mix60(expected[1], expected[0]),
+                                     label.get_text())
+            facts = [label for label in _drawn(screen, [])
+                     if isinstance(label, lv.label) and label.get_recolor()]
+            self.assertEqual(len(facts), 3)
             seen[light] = expected
             self._close()
         self.assertTrue(seen[True] != seen[False], "theme did not switch")
