@@ -84,9 +84,11 @@ MAX_FIELDS_PER_SCREEN = 8
 SPLASH_SECONDS = 5
 LOGO_SPLASH_MS = 2000       # start-screen logo duration (tap to skip)
 LOGO_TAP_GRACE = 0.7        # ignore taps this long after the logo appears
-# Two renderings of the same logo: the artwork as drawn for light
-# backgrounds, and an ink-inverted copy (black parts turned white, gold
-# left alone) for dark ones.
+# The horizontal logo lockup (TV mark plus wordmark), under a light-theme
+# and a dark-theme name. The family artwork's cream halo reads on light and
+# dark backgrounds alike, so both files currently hold the same image
+# (tools/build_assets.py writes both); the light/dark choice is kept so
+# the two could diverge again without a code change.
 LOGO_ASSET_LIGHT = "blocktv_logo_light.png"
 LOGO_ASSET_DARK = "blocktv_logo_dark.png"
 ATH_TEXT = "OPEN WATER BITCOIN"
@@ -1787,9 +1789,9 @@ class BlockTV(Activity):
         overlay.add_event_cb(lambda e: self._logo_tapped(),
                              lv.EVENT.CLICKED, None)
 
-        # Ink follows the background: inverted (white) artwork on dark
-        # themes, the logo as drawn on light ones. The gold is identical
-        # in both.
+        # The asset follows the background's brightness. Both currently
+        # hold the same artwork, whose cream halo works on either (see
+        # LOGO_ASSET_LIGHT).
         asset = (LOGO_ASSET_LIGHT if _lum(self._bg_hex) > 140
                  else LOGO_ASSET_DARK)
         path = resolve_drawable(self.appFullName, asset)
@@ -2637,8 +2639,9 @@ class AboutActivity(Activity):
 
     def _add_logo(self, screen):
         # Settings screens wear the OS theme rather than the app's colours,
-        # so the ink is chosen from the theme's own background, not from
-        # the user's background pref.
+        # so the light/dark asset is chosen from the theme's own
+        # background, not from the user's background pref (both currently
+        # hold the same artwork; see LOGO_ASSET_LIGHT).
         asset = LOGO_ASSET_DARK
         try:
             c = screen.get_style_bg_color(lv.PART.MAIN)

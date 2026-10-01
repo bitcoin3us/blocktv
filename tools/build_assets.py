@@ -1,66 +1,101 @@
 #!/usr/bin/env python3
-"""Regenerate BlockTV's app artwork from the authored SVG sources.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ZapTV.org
+#
+# This file is part of BlockTV. BlockTV is free software: you can redistribute
+# it and/or modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version. It is distributed WITHOUT
+# ANY WARRANTY; see the GNU General Public License (LICENSE) for details.
+
+"""Regenerate BlockTV's logo assets from the SVG sources in artwork/.
 
     python3 tools/build_assets.py [--check]
 
-Renders with rsvg-convert (brew install librsvg) rather than a PNG export,
-so the source of truth stays vector. Note that macOS `qlmanage` can also
-render SVG but flattens the alpha channel, which is useless here.
+Sources are the ZapTV family files, copied into artwork/ with their C2PA
+<metadata> block stripped and nothing else changed:
 
-Outputs, all indexed-palette PNG with a tRNS chunk — the MicroPythonOS
-lodepng build silently fails to draw RGBA truecolour PNGs:
+    artwork/blocktv-logo.svg       the TV mark (viewBox 0 0 634 567)
+    artwork/blocktv-wordmark.svg   the BLOCKTV wordmark: #111 ink over a
+                                   cream #f8f5eb halo, so it reads on light
+                                   and dark backgrounds alike
 
-    icon_64x64.png                        launcher icon, TV mark + white halo
-    res/drawable-mdpi/blocktv_logo_light.png   splash, dark ink  (light themes)
-    res/drawable-mdpi/blocktv_logo_dark.png    splash, light ink (dark themes)
+Outputs, all indexed-palette PNG with a tRNS chunk (older MicroPythonOS
+lodepng builds silently fail to draw RGBA truecolour PNGs):
+
+    icon_64x64.png                             launcher icon
+    res/drawable-mdpi/blocktv_logo_light.png   splash and About lockup
+    res/drawable-mdpi/blocktv_logo_dark.png    the same lockup
+
+The launcher icon is the whole mark viewBox fitted to the tile width
+(64x57) and centred vertically (y=3) in a fully transparent tile, the
+convention the whole ZapTV family follows.
+
+The lockup is composed here from the two sources: the mark on the left,
+the wordmark on the right, mark height 2.2x the wordmark's viewBox height,
+a gap of 0.35x that height, and the wordmark centred vertically on the
+mark. The light and dark files hold the SAME artwork: the cream halo lets
+one design work on both themes, and keeping both names means the app's
+theme switch needs no change.
+
+Renders with rsvg-convert (brew install librsvg), which ignores the mark's
+CSS animation and draws its resting frame. Everything is rendered large
+and downscaled once with LANCZOS, which keeps the edges clean. macOS
+`qlmanage` can also render SVG but flattens the alpha channel, so it is no
+use here.
 
 --check reports what would change without writing anything.
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
 
 from PIL import Image, ImageChops
 
-ART = "/Users/RT/Documents/Projects/BlockTV"
-APP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "org.zaptv.blocktv")
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+ART = os.path.join(ROOT, "artwork")
+APP = os.path.join(ROOT, "org.zaptv.blocktv")
 
 SOURCES = {
-    "tv": os.path.join(ART, "blocktv-tv-logo-trans.svg"),
-    "full_black": os.path.join(ART, "blocktv-logo-trans-black.svg"),
-    "full_white": os.path.join(ART, "blocktv-logo-trans-white.svg"),
+    "logo": os.path.join(ART, "blocktv-logo.svg"),
+    "wordmark": os.path.join(ART, "blocktv-wordmark.svg"),
 }
 
 ICON_PX = 64
-ICON_RENDER_PX = 1200      # render big, downscale once — keeps edges clean
-# No synthetic halo: measured against ZapTV's icon, its white border is
-# ~1 px at 64 px — just the artwork's own cream outline, which BlockTV's
-# artwork also carries. The Gaussian halo previously added here came out
-# 4-8 px thick and made the mark visibly smaller than ZapTV's.
-# Sized to match the sibling ZapTV app so the two feel like one family.
-# In both logos the TV mark spans the full asset height, so equal height
-# = equal-sized TV on screen: ZapTV's splash is 96 px tall (mark = 40%
-# of a 240 px screen). BlockTV's overall width then lands wherever its
-# longer wordmark puts it. The icon mark fills the tile width at 89% of
-# its height, ~1 px cream border from the artwork itself (no halo).
-SPLASH_H = 96
-SPLASH_RENDER_PX = 1900
-ICON_FILL_W = 64 / 64.0
-ICON_FILL_H = 57 / 64.0
+ICON_RENDER_PX = 1200        # render big, downscale once
+
+# Same width as the splash it replaces, so the About page (whose logo
+# scale was tuned for that width) still fits; the height follows from the
+# lockup's proportions (276x75).
+LOCKUP_W = 276
+LOCKUP_RENDER_PX = 8 * LOCKUP_W
+LOCKUP_MARK_RATIO = 2.2      # mark height / wordmark viewBox height
+LOCKUP_GAP_RATIO = 0.35      # gap / wordmark viewBox height
 
 
-def render(svg, width):
-    """SVG -> RGBA image at the requested width."""
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-        path = tmp.name
-    try:
-        subprocess.run(["rsvg-convert", "-w", str(width), "-o", path, svg],
+def read_svg(path):
+    """(viewBox as four floats, markup inside the root <svg>) of a file."""
+    with open(path, encoding="utf-8") as f:
+        s = f.read()
+    s = re.sub(r"<metadata>.*?</metadata>", "", s, flags=re.S)
+    vb = [float(v) for v in re.search(r'viewBox="([^"]+)"', s).group(1).split()]
+    body = s[s.index(">", s.index("<svg")) + 1:s.rindex("</svg>")]
+    return vb, body
+
+
+def render(svg_text, width):
+    """SVG markup -> RGBA image at the requested width."""
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "in.svg")
+        out = os.path.join(tmp, "out.png")
+        with open(src, "w", encoding="utf-8") as f:
+            f.write(svg_text)
+        subprocess.run(["rsvg-convert", "-w", str(width), "-o", out, src],
                        check=True, capture_output=True)
-        return Image.open(path).convert("RGBA").copy()
-    finally:
-        os.unlink(path)
+        return Image.open(out).convert("RGBA").copy()
 
 
 def to_indexed(img):
@@ -69,71 +104,78 @@ def to_indexed(img):
 
 
 def build_icon():
-    # The artwork as drawn — its own cream outline provides the dark-
-    # launcher separation, exactly as ZapTV's does. Scaled so the mark is
-    # the SAME HEIGHT as ZapTV's (57 of 64 px): BlockTV's artwork is a
-    # slightly wider shape because of the flying shards, so matching
-    # height means the outermost shard tips graze past the tile edge and
-    # are cropped — the same way ZapTV's own mark touches its edges.
-    art = render(SOURCES["tv"], ICON_RENDER_PX)
-    art = art.crop(art.split()[3].getbbox())
-    box_h = round(ICON_PX * ICON_FILL_H)
-    scale = box_h / art.size[1]
-    target = (max(1, round(art.size[0] * scale)), box_h)
-    mark = art.resize(target, Image.LANCZOS)
+    vb, _ = read_svg(SOURCES["logo"])
+    with open(SOURCES["logo"], encoding="utf-8") as f:
+        art = render(f.read(), ICON_RENDER_PX)
+    h = round(ICON_PX * vb[3] / vb[2])                   # 57
+    mark = art.resize((ICON_PX, h), Image.LANCZOS)
     tile = Image.new("RGBA", (ICON_PX, ICON_PX), (255, 255, 255, 0))
-    tile.alpha_composite(mark, ((ICON_PX - target[0]) // 2, (ICON_PX - target[1]) // 2))
+    tile.alpha_composite(mark, (0, (ICON_PX - h) // 2))  # y = 3
     return to_indexed(tile)
 
 
-def build_splash():
-    """Both variants share one crop box so the logo does not shift or
-    resize when the theme flips."""
-    black = render(SOURCES["full_black"], SPLASH_RENDER_PX)
-    white = render(SOURCES["full_white"], SPLASH_RENDER_PX)
-    bb, wb = black.split()[3].getbbox(), white.split()[3].getbbox()
-    box = (min(bb[0], wb[0]), min(bb[1], wb[1]), max(bb[2], wb[2]), max(bb[3], wb[3]))
-    out = []
-    for src in (black, white):
-        im = src.crop(box)
-        scale = SPLASH_H / im.size[1]
-        im = im.resize((max(1, round(im.size[0] * scale)), SPLASH_H), Image.LANCZOS)
-        out.append(to_indexed(im))
-    return out           # light-theme asset, dark-theme asset
+def lockup_svg():
+    """The horizontal lockup as one SVG, both sources nested whole."""
+    lvb, lbody = read_svg(SOURCES["logo"])
+    wvb, wbody = read_svg(SOURCES["wordmark"])
+    ww, wh = wvb[2], wvb[3]
+    mh = LOCKUP_MARK_RATIO * wh
+    mw = mh * lvb[2] / lvb[3]
+    gap = LOCKUP_GAP_RATIO * wh
+
+    def nest(x, y, w, h, vb, body):
+        return ('<svg x="%.3f" y="%.3f" width="%.3f" height="%.3f" viewBox="%s">%s</svg>'
+                % (x, y, w, h, " ".join("%g" % v for v in vb), body))
+
+    w, h = mw + gap + ww, mh
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %.3f %.3f">' % (w, h)
+           + nest(0, 0, mw, mh, lvb, lbody)
+           + nest(mw + gap, (mh - wh) / 2, ww, wh, wvb, wbody)
+           + "</svg>")
+    return svg, w, h
+
+
+def build_lockup():
+    svg, w, h = lockup_svg()
+    art = render(svg, LOCKUP_RENDER_PX)
+    size = (LOCKUP_W, round(LOCKUP_W * h / w))           # 276x75
+    return to_indexed(art.resize(size, Image.LANCZOS))
 
 
 def write(img, relpath, check):
     path = os.path.normpath(os.path.join(APP, relpath))
     new = img.convert("RGBA")
     if os.path.exists(path):
-        old = Image.open(path).convert("RGBA")
-        if old.size == new.size and ImageChops.difference(old, new).getbbox() is None:
+        old = Image.open(path)
+        if (old.mode == img.mode and old.size == new.size
+                and ImageChops.difference(old.convert("RGBA"), new).getbbox() is None):
             print("  unchanged  %s" % relpath)
             return False
     if check:
-        print("  WOULD WRITE %s %s" % (relpath, new.size))
+        print("  WOULD WRITE %s %s %s" % (relpath, img.mode, new.size))
         return True
     img.save(path, optimize=True)
-    print("  wrote      %s %s (%d bytes)" % (relpath, img.size, os.stat(path).st_size))
+    print("  wrote      %s %s %s (%d bytes)"
+          % (relpath, img.mode, img.size, os.stat(path).st_size))
     return True
 
 
 def main():
     check = "--check" in sys.argv
-    for name, path in SOURCES.items():
+    for path in SOURCES.values():
         if not os.path.exists(path):
             sys.exit("missing source: %s" % path)
     try:
         subprocess.run(["rsvg-convert", "--version"], check=True, capture_output=True)
     except Exception:
-        sys.exit("rsvg-convert not found — run: brew install librsvg")
+        sys.exit("rsvg-convert not found; run: brew install librsvg")
 
-    print("building from %s" % ART)
+    print("building from %s" % os.path.relpath(ART, ROOT))
     changed = write(build_icon(), "icon_64x64.png", check)
-    light, dark = build_splash()
-    changed |= write(light, "res/drawable-mdpi/blocktv_logo_light.png", check)
-    changed |= write(dark, "res/drawable-mdpi/blocktv_logo_dark.png", check)
-    print("done —", "changes pending" if (check and changed) else
+    lockup = build_lockup()
+    changed |= write(lockup, "res/drawable-mdpi/blocktv_logo_light.png", check)
+    changed |= write(lockup, "res/drawable-mdpi/blocktv_logo_dark.png", check)
+    print("done:", "changes pending" if (check and changed) else
           ("updated" if changed else "everything already current"))
 
 

@@ -181,3 +181,12 @@ the selected fields (it scrolls sideways); the numbers in them are the field
 order, and slot 1 is the biggest cell, so the field listed first gets the
 room. A screen with no layout chosen keeps the automatic arrangement.
 
+## Artwork
+
+The launcher icon and the start-screen/About logo come from the ZapTV
+logo family. Their SVG sources live in [`artwork/`](artwork/) (the
+family files with only their C2PA metadata block removed), and
+`python3 tools/build_assets.py` regenerates every logo PNG in the app
+from them; `--check` reports what would change without writing. It
+needs `rsvg-convert` (`brew install librsvg`) and Pillow.
+
