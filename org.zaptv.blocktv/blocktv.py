@@ -101,12 +101,20 @@ ATH_SCROLL_SEP = "          "
 ATH_SCROLL_PX_S = 45           # marquee speed; duration is derived from length
                                # so a longer message scrolls at the same pace
 ATH_CHAR_PX = 9                # rough advance of the bold 16 px face
+# The About screen, laid out the same way in every ZapTV app. The footer
+# strings are broken by hand wherever a line would not fit the footer
+# width (DisplayMetrics.width() - 100), so LVGL never splits a name.
 APP_SITE = "www.ZapTV.org"
-# Broken by hand so the name never splits across the wrap.
 APP_CREDIT = "A fully open-source app\nby Richard Nakamoto"
-APP_LICENSE = ("Free software: GNU GPL v3 or later, no warranty.\n"
-               "Shared modules from zaptv-lib (MIT).")
-ABOUT_LOGO_SCALE = 166      # 256 = 100%, so ~65%
+APP_LICENSE = ("© 2026 ZapTV.org. Free software:\n"
+               "GNU GPL v3 or later, no warranty.")
+APP_THIRD_PARTY = "Shared modules from\nzaptv-lib (MIT)."
+LOGO_H = 44                 # About logo height in px, the same in every app
+# Tight spacing, so that the logo, three facts (a long board name takes two
+# lines), the site and six footer lines fit 240 px without scrolling. At
+# 12 px a line is 16 px tall; -3 closes the leading without glyphs touching.
+ABOUT_PAD_ROW = 1           # gap between the About screen's rows
+ABOUT_LINE_SPACE = -3       # leading inside the multi-line About labels
 _HW_ACRONYMS = ("lcd", "oled", "tft", "gps", "imu", "ir", "sd", "usb", "tv")
 # A move worth a second look, per range — scaled to what is ordinary for
 # each window, so a 3% day shouts and a 3% year does not. Past these the
@@ -281,25 +289,27 @@ def resolve_drawable(fullname, name):
 
 
 def _hardware_id():
+    """The board id MicroPythonOS detected at boot, or None."""
     try:
         from mpos.device_info import DeviceInfo
         return DeviceInfo.get_hardware_id()
     except Exception:
-        return "unknown"
+        return None
 
 
 def _os_version():
     try:
         from mpos.build_info import BuildInfo
-        return BuildInfo.version.release
+        return BuildInfo.version.release or "unknown"
     except Exception:
         return "unknown"
 
 
 def _pretty_hardware(board):
-    """waveshare_esp32_s3_touch_lcd_2 -> Waveshare ESP32 S3 Touch LCD 2."""
+    """waveshare_esp32_s3_touch_lcd_2 -> Waveshare ESP32 S3 Touch LCD 2,
+    or "unknown" when there is no board id to show."""
     words = []
-    for token in str(board).replace("-", "_").split("_"):
+    for token in str(board or "").replace("-", "_").split("_"):
         if not token:
             continue
         # Model codes (esp32, s3, m5stack) and hardware acronyms both read
@@ -308,7 +318,7 @@ def _pretty_hardware(board):
             words.append(token.upper())
         else:
             words.append(token[0].upper() + token[1:])
-    return " ".join(words) or str(board)
+    return " ".join(words) or "unknown"
 
 
 def app_version(fullname):
@@ -329,12 +339,19 @@ def fit_size(text, max_w, max_h):
 
 
 def _add_floating_back(screen, on_click):
-    """Floating return button pinned bottom-right, matching the affordance
-    the Lightning Piggy app uses on its settings screens. FLOATING keeps
-    it in place while the settings list scrolls behind it."""
+    """Floating return button in the bottom-right corner, matching the
+    affordance the Lightning Piggy app uses on its settings screens.
+    FLOATING keeps it in place while the settings list scrolls behind it.
+
+    It sits in the corner itself rather than inside the screen's padding,
+    so centred content DisplayMetrics.width() - 100 wide (the About
+    footer) always clears it."""
     btn = lv.obj(screen)
     btn.set_size(50, 50)
-    btn.align(lv.ALIGN.BOTTOM_RIGHT, 0, 0)
+    # align() places a child inside its parent's padding; step back out.
+    btn.align(lv.ALIGN.BOTTOM_RIGHT,
+              screen.get_style_pad_right(lv.PART.MAIN),
+              screen.get_style_pad_bottom(lv.PART.MAIN))
     btn.add_flag(lv.obj.FLAG.CLICKABLE)
     btn.add_flag(lv.obj.FLAG.FLOATING)
     btn.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
@@ -2287,7 +2304,7 @@ class MainSettingsActivity(SettingsActivity):
              "placeholder": DEFAULT_BASE_URL, "default_value": DEFAULT_BASE_URL},
             {"title": "About", "ui": "activity",
              "activity_class": AboutActivity,
-             "placeholder": "Versions and where to find us", "key": "_about"},
+             "placeholder": "Version, credits and licence", "key": "_about"},
         ]
         screen = lv.obj()
         screen.set_style_pad_all(DisplayMetrics.pct_of_width(2), lv.PART.MAIN)
@@ -2583,7 +2600,10 @@ class AiUsageSettingsActivity(Activity):
 
 class AboutActivity(Activity):
     """Logo, the three version numbers worth quoting in a bug report,
-    and where to find the app."""
+    where to find the app, and its legal notices (GPL section 5(d): an
+    interactive program shows them). Every ZapTV app shares this layout,
+    which fits a 320x240 screen without scrolling, even with the longest
+    board name. Colours come from the MicroPythonOS light/dark theme."""
 
     def onCreate(self):
         screen = lv.obj()
@@ -2591,8 +2611,9 @@ class AboutActivity(Activity):
         screen.set_flex_flow(lv.FLEX_FLOW.COLUMN)
         screen.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER,
                               lv.FLEX_ALIGN.START)
-        screen.set_style_pad_row(6, lv.PART.MAIN)
+        screen.set_style_pad_row(ABOUT_PAD_ROW, lv.PART.MAIN)
         screen.set_style_border_width(0, lv.PART.MAIN)
+        screen.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
         self.setContentView(screen)
 
     def onResume(self, screen):
@@ -2603,64 +2624,48 @@ class AboutActivity(Activity):
                             ("MicroPythonOS", _os_version()),
                             ("Hardware", _pretty_hardware(_hardware_id()))):
             self._add_fact(screen, name, value)
-
         site = lv.label(screen)
         site.set_text(APP_SITE)
         site.set_style_text_font(FontManager.getFont(size=16), lv.PART.MAIN)
-        site.set_style_pad_top(4, lv.PART.MAIN)
-
-        credit = lv.label(screen)
-        credit.set_text(APP_CREDIT)
-        credit.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
-        credit.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
-        credit.set_long_mode(lv.label.LONG_MODE.WRAP)
-        # Wrapped and centred, and kept clear of the floating back button
-        # in the corner it would otherwise run under.
-        credit.set_width(DisplayMetrics.width() - 60)
-        credit.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
-        credit.set_style_pad_top(2, lv.PART.MAIN)
-
-        # GPL section 5(d): an interactive program shows its legal notices.
-        licence = lv.label(screen)
-        licence.set_text(APP_LICENSE)
-        licence.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
-        licence.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
-        licence.set_long_mode(lv.label.LONG_MODE.WRAP)
-        licence.set_width(DisplayMetrics.width() - 60)
-        licence.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
-        licence.set_style_pad_top(6, lv.PART.MAIN)
-
+        for text in (APP_CREDIT, APP_LICENSE, APP_THIRD_PARTY):
+            self._add_footer(screen, text)
         _add_floating_back(screen, self.finish)
 
     def _add_logo(self, screen):
+        """The family lockup, LOGO_H tall, or the app name if it will not
+        load."""
         path = resolve_drawable(self.appFullName, LOGO_ASSET)
         if path:
+            img = lv.image(screen)
             try:
-                img = lv.image(screen)
                 img.set_src(path)
                 img.update_layout()
-                if img.get_width() > 0:
-                    # The About page must fit the logo, three facts, the
-                    # site and the credit on 240 px without scrolling.
-                    # set_scale only scales what is DRAWN -- the widget
-                    # keeps reserving the full height -- so the box has to
-                    # be resized to match, or the layout gains nothing.
-                    try:
-                        w0, h0 = img.get_width(), img.get_height()
-                        img.set_scale(ABOUT_LOGO_SCALE)
-                        img.set_size(w0 * ABOUT_LOGO_SCALE // 256,
-                                     h0 * ABOUT_LOGO_SCALE // 256)
-                        img.update_layout()
-                    except Exception:
-                        pass                  # older binding: full size
+                w0, h0 = img.get_width(), img.get_height()
+                if w0 > 0 and h0 > 0:
+                    # set_scale only scales what is DRAWN: the widget keeps
+                    # reserving the native size, so its box is resized to
+                    # match, or the layout gains nothing.
+                    img.set_scale(LOGO_H * 256 // h0)
+                    img.set_size(w0 * LOGO_H // h0, LOGO_H)
                     return
-                img.set_src(None)
-                img.delete()
             except Exception as e:
                 print("BlockTV: about logo failed: {}".format(e))
+            img.delete()
         label = lv.label(screen)
         label.set_text("BlockTV")
         label.set_style_text_font(FontManager.getFont(size=28), lv.PART.MAIN)
+
+    def _add_footer(self, screen, text):
+        # DisplayMetrics.width() - 100 wide and centred, which keeps every
+        # line clear of the 50 px back button in the bottom-right corner.
+        label = lv.label(screen)
+        label.set_text(text)
+        label.set_style_text_font(FontManager.getFont(size=12), lv.PART.MAIN)
+        label.set_style_text_opa(lv.OPA._60, lv.PART.MAIN)
+        label.set_style_text_line_space(ABOUT_LINE_SPACE, lv.PART.MAIN)
+        label.set_long_mode(lv.label.LONG_MODE.WRAP)
+        label.set_width(DisplayMetrics.width() - 100)
+        label.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
 
     def _add_fact(self, screen, name, value):
         row = button_row(screen)
@@ -2676,6 +2681,7 @@ class AboutActivity(Activity):
         # Board names run long (Waveshare ESP32 S3 Touch LCD 2); wrap rather
         # than clip, since a half-shown board name is no use in a bug report.
         right.set_long_mode(lv.label.LONG_MODE.WRAP)
+        right.set_style_text_line_space(ABOUT_LINE_SPACE, lv.PART.MAIN)
         right.set_flex_grow(1)
         right.set_style_text_align(lv.TEXT_ALIGN.RIGHT, lv.PART.MAIN)
 
