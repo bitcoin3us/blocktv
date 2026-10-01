@@ -148,7 +148,7 @@ def write(img, relpath, check):
     if os.path.exists(path):
         old = Image.open(path)
         if (old.mode == img.mode and old.size == new.size
-                and ImageChops.difference(old.convert("RGBA"), new).getbbox() is None):
+                and ImageChops.difference(old.convert("RGBA"), new).getbbox(alpha_only=False) is None):
             print("  unchanged  %s" % relpath)
             return False
     if check:
