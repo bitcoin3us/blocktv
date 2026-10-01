@@ -69,9 +69,9 @@ SOURCES = {
 ICON_PX = 64
 ICON_RENDER_PX = 1200        # render big, downscale once
 
-# Same width as the splash it replaces, so the About page (whose logo
-# scale was tuned for that width) still fits; the height follows from the
-# lockup's proportions (276x75).
+# Same width as the splash it replaces; the height follows from the
+# lockup's proportions (276x75). The About page draws it LOGO_H (44 px)
+# tall whatever its size, so only the splash depends on this width.
 LOCKUP_W = 276
 LOCKUP_RENDER_PX = 8 * LOCKUP_W
 LOCKUP_MARK_RATIO = 2.2      # mark height / wordmark viewBox height

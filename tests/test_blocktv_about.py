@@ -52,7 +52,7 @@ LONG_BOARD_PRETTY = "Waveshare ESP32 S3 Touch LCD 3 5"
 SITE = "www.ZapTV.org"
 CREDIT = "A fully open-source app\nby Richard Nakamoto"
 LEGAL = "© 2026 ZapTV.org. Free software:\nGNU GPL v3 or later, no warranty."
-THIRD_PARTY = "Shared modules from\nzaptv-lib (MIT)."
+THIRD_PARTY = "Uses zaptv-lib (MIT)."
 SUBTITLE = "Version, credits and licence"
 LOGO_H = 44
 THEME_PREFS = "com.micropythonos.settings"   # where MicroPythonOS keeps it
@@ -113,6 +113,14 @@ def _rgb(color):
     return color.red, color.green, color.blue
 
 
+def _settle():
+    """Let a new screen finish sliding in. MicroPythonOS animates screen
+    loads over 500 ms and each frame here advances the tick by 16 ms, so
+    40 frames always outlast it; measured any sooner, a screen can still
+    be part-way across with every coordinate shifted right."""
+    wait_for_render(40)
+
+
 def _set_theme(light):
     AppearanceManager.set_light_mode(light, SharedPreferences(THEME_PREFS))
     wait_for_render(5)
@@ -156,7 +164,7 @@ class TestBlockTVAbout(unittest.TestCase):
         intent.app_fullname = FULLNAME
         intent.putExtra("prefs", SharedPreferences(FULLNAME))
         ActivityNavigator.startActivity(intent)
-        wait_for_render(20)
+        _settle()
         settings = _top()
         self.assertTrue(isinstance(settings, blocktv.MainSettingsActivity))
         return settings
@@ -166,7 +174,7 @@ class TestBlockTVAbout(unittest.TestCase):
         settings = self._open_settings()
         row = next(s for s in settings.settings if s.get("title") == "About")
         row["cont"].send_event(lv.EVENT.CLICKED, None)
-        wait_for_render(20)
+        _settle()
         self.assertTrue(isinstance(_top(), blocktv.AboutActivity))
         screen = lv.screen_active()
         screen.update_layout()
@@ -250,12 +258,16 @@ class TestBlockTVAbout(unittest.TestCase):
             raise OSError(2)
 
         self._patch("open", no_file)
-        DeviceInfo.set_hardware_id(None)
-        BuildInfo.version.release = None
-        items, _ = _content(self._open_about())
-        self.assertEqual(items[1:4], [("fact", "BlockTV", "unknown"),
-                                      ("fact", "MicroPythonOS", "unknown"),
-                                      ("fact", "Hardware", "unknown")])
+        # None, and the placeholder DeviceInfo keeps when no board
+        # registered itself, both read "unknown".
+        for board in (None, "missing-hardware-info"):
+            DeviceInfo.set_hardware_id(board)
+            BuildInfo.version.release = None
+            items, _ = _content(self._open_about())
+            self.assertEqual(items[1:4], [("fact", "BlockTV", "unknown"),
+                                          ("fact", "MicroPythonOS", "unknown"),
+                                          ("fact", "Hardware", "unknown")])
+            self._close()
 
     def test_logo_falls_back_to_the_app_name(self):
         for path in (None, "M:" + APP + "/MANIFEST.JSON"):   # missing, not a PNG

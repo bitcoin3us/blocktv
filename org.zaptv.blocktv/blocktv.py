@@ -108,11 +108,12 @@ APP_SITE = "www.ZapTV.org"
 APP_CREDIT = "A fully open-source app\nby Richard Nakamoto"
 APP_LICENSE = ("© 2026 ZapTV.org. Free software:\n"
                "GNU GPL v3 or later, no warranty.")
-APP_THIRD_PARTY = "Shared modules from\nzaptv-lib (MIT)."
+APP_THIRD_PARTY = "Uses zaptv-lib (MIT)."
 LOGO_H = 44                 # About logo height in px, the same in every app
-# Tight spacing, so that the logo, three facts (a long board name takes two
-# lines), the site and six footer lines fit 240 px without scrolling. At
-# 12 px a line is 16 px tall; -3 closes the leading without glyphs touching.
+# Tight spacing, the same in every app, so that the logo, three facts (a
+# long board name takes two lines), the site and up to six footer lines
+# fit 240 px without scrolling. At 12 px a line is 16 px tall; -3 closes
+# the leading without glyphs touching.
 ABOUT_PAD_ROW = 1           # gap between the About screen's rows
 ABOUT_LINE_SPACE = -3       # leading inside the multi-line About labels
 _HW_ACRONYMS = ("lcd", "oled", "tft", "gps", "imu", "ir", "sd", "usb", "tv")
@@ -289,12 +290,15 @@ def resolve_drawable(fullname, name):
 
 
 def _hardware_id():
-    """The board id MicroPythonOS detected at boot, or None."""
+    """The board id MicroPythonOS detected at boot, or None. A board that
+    never registers itself leaves DeviceInfo's placeholder, which is no
+    more use to a reader than no id at all."""
     try:
         from mpos.device_info import DeviceInfo
-        return DeviceInfo.get_hardware_id()
+        board = DeviceInfo.get_hardware_id()
     except Exception:
         return None
+    return None if board == "missing-hardware-info" else board
 
 
 def _os_version():
