@@ -430,6 +430,21 @@ def migrate_theme_pref(prefs):
     editor.commit()
 
 
+def _copied(data):
+    """A copy of cached data that shares no dict or list with the original.
+
+    SharedPreferences writes only when what it is given differs from the
+    data it loaded or last saved. A dict or list held by both the prefs
+    and the live state changes on both sides at once, so a change made to
+    it in place looks like no change at all and never reaches flash.
+    Numbers and strings cannot change in place, so they are shared."""
+    if isinstance(data, dict):
+        return {k: _copied(v) for k, v in data.items()}
+    if isinstance(data, (list, tuple)):
+        return [_copied(v) for v in data]
+    return data
+
+
 def _plain(obj):
     """Transparent, borderless, unpadded, unscrollable container."""
     obj.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
@@ -904,7 +919,12 @@ class BlockTV(Activity):
         if self._cache_restored:
             return
         self._cache_restored = True
-        cached = self.cache.get_dict("data")
+        # A copy: get_dict copies only the outer dict (in MPOS 0.11.0 and
+        # 0.11.1 not even that). Without it the restored charts and archive
+        # would be the prefs' own dicts and lists, so a change made to them
+        # in place would change the prefs too and _save_cache would see
+        # nothing new.
+        cached = _copied(self.cache.get_dict("data"))
         if not cached:
             return
         state = self.state
@@ -962,7 +982,11 @@ class BlockTV(Activity):
     def _save_cache(self):
         self._cache_saved_at = time.time()
         editor = self.cache.edit()
-        editor.put_dict("data", {
+        # A copy, so the prefs never hold the state's own dicts and lists:
+        # the charts, the fine samples and the stamps change in place, and
+        # the next save would compare them with themselves and skip the
+        # write.
+        editor.put_dict("data", _copied({
             "height": self.state.get("height"),
             "fee": self.state.get("fee"),
             "fee_low": self.state.get("fee_low"),
@@ -983,7 +1007,7 @@ class BlockTV(Activity):
             "archive": self.state.get("archive") or {},
             "archive_order": self.state.get("archive_order") or [],
             "updated_at": self.state.get("updated_at") or {},
-        })
+        }))
         editor.commit()
 
     # --- Staleness ---
